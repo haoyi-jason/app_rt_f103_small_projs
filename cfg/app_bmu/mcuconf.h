@@ -17,10 +17,8 @@
 #ifndef MCUCONF_H
 #define MCUCONF_H
 
-#define STM32F103_MCUCONF
-
 /*
- * STM32F103 drivers configuration.
+ * STM32F4xx drivers configuration.
  * The following settings override the default settings present in
  * the various device driver implementation headers.
  * Note that the settings for each driver only have effect if the whole
@@ -33,28 +31,30 @@
  * 0...3        Lowest...Highest.
  */
 
+#define STM32F103_MCUCONF
+#define AT32F4xx_MCUCONF
+
 /*
  * HAL driver system settings.
  */
 #define STM32_NO_INIT                       FALSE
 #define STM32_HSI_ENABLED                   TRUE
-#define STM32_LSI_ENABLED                   FALSE
+#define STM32_LSI_ENABLED                   TRUE
 #define STM32_HSE_ENABLED                   TRUE
 #define STM32_LSE_ENABLED                   FALSE
+
 #define STM32_SW                            STM32_SW_PLL
+
 #define STM32_PLLSRC                        STM32_PLLSRC_HSE
-#define STM32_PLLXTPRE                      STM32_PLLXTPRE_DIV1
-#define STM32_PLLMUL_VALUE                  9
+
+#define STM32_PLLM_VALUE                    9 // 2..64
+#define STM32_PLLN_VALUE                    16
+#define STM32_PLLP_VALUE                    4
+#define STM32_PLLQ_VALUE                    8
 #define STM32_HPRE                          STM32_HPRE_DIV1
 #define STM32_PPRE1                         STM32_PPRE1_DIV2
-#define STM32_PPRE2                         STM32_PPRE2_DIV2
-#define STM32_ADCPRE                        STM32_ADCPRE_DIV4
-#define STM32_USB_CLOCK_REQUIRED            TRUE
-#define STM32_USBPRE                        STM32_USBPRE_DIV1P5
-#define STM32_MCOSEL                        STM32_MCOSEL_NOCLOCK
-#define STM32_RTCSEL                        STM32_RTCSEL_HSEDIV
-#define STM32_PVD_ENABLE                    FALSE
-#define STM32_PLS                           STM32_PLS_LEV0
+#define STM32_PPRE2                         STM32_PPRE2_DIV1
+#define STM32_RTCSEL                        STM32_RTCSEL_LSI
 
 /*
  * IRQ system settings.
@@ -67,9 +67,12 @@
 #define STM32_IRQ_EXTI5_9_PRIORITY          6
 #define STM32_IRQ_EXTI10_15_PRIORITY        6
 #define STM32_IRQ_EXTI16_PRIORITY           6
-#define STM32_IRQ_EXTI17_PRIORITY           6
+#define STM32_IRQ_EXTI17_PRIORITY           15
 #define STM32_IRQ_EXTI18_PRIORITY           6
 #define STM32_IRQ_EXTI19_PRIORITY           6
+#define STM32_IRQ_EXTI20_PRIORITY           6
+#define STM32_IRQ_EXTI21_PRIORITY           15
+#define STM32_IRQ_EXTI22_PRIORITY           15
 
 /*
  * ADC driver system settings.
@@ -83,6 +86,12 @@
  */
 #define STM32_CAN_USE_CAN1                  TRUE
 #define STM32_CAN_CAN1_IRQ_PRIORITY         11
+
+/*
+ * CAN driver system settings.
+ */
+#define STM32_CAN_USE_CAN2                  FALSE       
+#define STM32_CAN_CAN2_IRQ_PRIORITY         11
 
 /*
  * GPT driver system settings.
@@ -103,14 +112,29 @@
 /*
  * I2C driver system settings.
  */
-#define STM32_I2C_USE_I2C1                  TRUE
-#define STM32_I2C_USE_I2C2                  FALSE
+#define STM32_I2C_USE_I2C1                  FALSE
+#define STM32_I2C_USE_I2C2                  TRUE
 #define STM32_I2C_BUSY_TIMEOUT              50
 #define STM32_I2C_I2C1_IRQ_PRIORITY         5
 #define STM32_I2C_I2C2_IRQ_PRIORITY         5
 #define STM32_I2C_I2C1_DMA_PRIORITY         3
 #define STM32_I2C_I2C2_DMA_PRIORITY         3
 #define STM32_I2C_DMA_ERROR_HOOK(i2cp)      osalSysHalt("DMA failure")
+
+/*
+ * I2S driver system settings.
+ */
+#define STM32_I2S_USE_SPI2                  FALSE
+#define STM32_I2S_USE_SPI3                  FALSE
+#define STM32_I2S_SPI2_IRQ_PRIORITY         10
+#define STM32_I2S_SPI3_IRQ_PRIORITY         10
+#define STM32_I2S_SPI2_DMA_PRIORITY         1
+#define STM32_I2S_SPI3_DMA_PRIORITY         1
+#define STM32_I2S_SPI2_RX_DMA_STREAM        STM32_DMA_STREAM_ID(1, 4)
+#define STM32_I2S_SPI2_TX_DMA_STREAM        STM32_DMA_STREAM_ID(1, 5)
+#define STM32_I2S_SPI3_RX_DMA_STREAM        STM32_DMA_STREAM_ID(1, 0)
+#define STM32_I2S_SPI3_TX_DMA_STREAM        STM32_DMA_STREAM_ID(1, 7)
+#define STM32_I2S_DMA_ERROR_HOOK(i2sp)      osalSysHalt("DMA failure")
 
 /*
  * ICU driver system settings.
@@ -150,6 +174,7 @@
  */
 #define STM32_RTC_IRQ_PRIORITY              15
 
+
 /*
  * SERIAL driver system settings.
  */
@@ -182,7 +207,7 @@
  * ST driver system settings.
  */
 #define STM32_ST_IRQ_PRIORITY               8
-#define STM32_ST_USE_TIMER                  3
+#define STM32_ST_USE_TIMER                  2
 
 /*
  * UART driver system settings.
