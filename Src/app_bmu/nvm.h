@@ -66,7 +66,9 @@ typedef struct{
   uint16_t voltages[NOF_MAX_CELL_PER_MODULE];
   uint8_t balancing[NOF_MAX_CELL_PER_MODULE];
   uint8_t state[NOF_MAX_CELL_PER_MODULE]; // normal or abnormal
+  uint8_t lastState[NOF_MAX_CELL_PER_MODULE];
   uint8_t balMask[2];
+  uint16_t openWire;// bit masked
 }_run_cell_info;
 
 typedef struct{
@@ -84,9 +86,26 @@ typedef struct{
 
 extern _runtime_info_s runTime;
 
-msg_t nvmReadPage(uint8_t page, uint8_t *d);
-msg_t nvmWritePage(uint8_t page, uint8_t *d);
-void nvmInit(I2CDriver *devp);
+//msg_t nvmReadPage(uint8_t page, uint8_t *d);
+//msg_t nvmWritePage(uint8_t page, uint8_t *d);
 
+
+msg_t nvm_runtime_set_cellVoltage(uint16_t *volts);
+msg_t nvm_runtime_get_cellVoltage(uint16_t *volts, uint8_t *n);
+msg_t nvm_runtime_get_cellVoltageQueued(uint16_t *volts, uint8_t *n);
+msg_t nvm_runtime_set_gpioVoltage(uint16_t *volts);
+msg_t nvm_runtime_get_gpioVoltage(uint16_t *volts, uint8_t *n);
+msg_t nvm_runtime_get_temperature(int16_t *value, uint8_t *n);
+msg_t nvm_get_cellQueue(uint8_t *queue);
+msg_t nvm_set_cellQueue(uint8_t *queue);
+msg_t nvm_get_bal_config(_nvm_balance_cfg_s *p);
+msg_t nvm_set_bal_config(_nvm_balance_cfg_s *p);
+msg_t nvm_get_block(uint8_t id, uint8_t *dptr);
+msg_t nvm_set_block(uint8_t id, uint8_t *dptr);
+msg_t nvm_runtime_get_balancing(uint8_t *p);
+msg_t nvm_runtime_set_balancing(uint8_t *p);
+msg_t nvm_runtime_get_balancingQueued(uint8_t *p);
+
+void nvmInit(I2CDriver *devp);
 
 #endif

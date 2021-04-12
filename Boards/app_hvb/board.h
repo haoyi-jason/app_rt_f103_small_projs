@@ -24,11 +24,8 @@
  * Board identifier.
  */
 #define BOARD_AT32F4
-#define BOARD_NAME              "BMU-6811"
-#define BOARD_ID                0x06080002
-
-#define NOF_MAX_CELL_PER_MODULE         12
-#define NOF_MAX_AUXIO                   5
+#define BOARD_NAME              "BMS_HVB"
+#define BOARD_ID                0x11150001
 
 /*
  * Board frequencies.
@@ -47,6 +44,7 @@
 #define AT32F413xx
 #define AT32F4XX
 #define AT32F413Rx_HD
+//#define AT32F413Cx_MD
 #define STM32_VDD 300U
 
 /*
@@ -114,39 +112,39 @@
 /*
  * Port A setup.
  */
-#define VAL_GPIOACRL    (PIN_ALTERNATE_PP_50(0)   | /* SMU_CPCK     */  \
-                         PIN_ALTERNATE_PP_50(1)    | /* SMU_CPOL        */  \
-                         PIN_ALTERNATE_PP_50(2)   | /* SMU_CPOH        */  \
-                         PIN_OUTPUT_PP_50(3)           | /* Not Used         */  \
-                         PIN_OUTPUT_PP_50(4)    | /* SPI1_CS */            \
-                         PIN_ALTERNATE_PP_50(5) | /* SPI1_SCK.          */  \
-                         PIN_ALTERNATE_PP_50(6)           | /* SPI1_MISO.         */  \
-                         PIN_ALTERNATE_PP_50(7))  /* SPI1_MOSI.         */
-#define VAL_GPIOACRH    (PIN_ALTERNATE_OD_10(8) | /* I2C2.SCL              */  \
-                         PIN_OUTPUT_PP_50(9) | /* USART1_TX.         */  \
-                         PIN_INPUT(10)          | /* USART1_RX.         */  \
-                         PIN_INPUT_PUD(11)      | /* USART1_CTS            */  \
-                         PIN_INPUT_PUD(12)      | /* USART1_RTS            */  \
+#define VAL_GPIOACRL    (PIN_UNDEFINED(0)   | /* SMU_CPCK     */  \
+                         PIN_UNDEFINED(1)    | /* SMU_CPOL        */  \
+                         PIN_UNDEFINED(2)   | /* SMU_CPOH        */  \
+                         PIN_UNDEFINED(3)           | /* Not Used         */  \
+                         PIN_UNDEFINED(4)    | /* SPI1_CS */            \
+                         PIN_UNDEFINED(5) | /* SPI1_SCK.          */  \
+                         PIN_UNDEFINED(6)           | /* SPI1_MISO.         */  \
+                         PIN_UNDEFINED(7))  /* SPI1_MOSI.         */
+#define VAL_GPIOACRH    (PIN_UNDEFINED(8) | /* I2C2.SCL              */  \
+                         PIN_UNDEFINED(9) | /* USART1_TX.         */  \
+                         PIN_UNDEFINED(10)          | /* USART1_RX.         */  \
+                         PIN_ALTERNATE_PP_50(11)      | /* USART1_CTS            */  \
+                         PIN_ALTERNATE_PP_50(12)      | /* USART1_RTS            */  \
                          PIN_UNDEFINED(13)          | /* Not use              */  \
                          PIN_UNDEFINED(14)          | /* not use            */  \
-                         PIN_INPUT_PUD(15))     /* SMU_STB               */
+                         PIN_UNDEFINED(15))     /* SMU_STB               */
 #define VAL_GPIOAODR    0xFFFFFFF7
 
 /*
  * Port B setup.
  */
-#define VAL_GPIOBCRL    (PIN_OUTPUT_PP_2(0)    | /* SmartCard_3/5V.    */  \
-                         PIN_OUTPUT_PP_2(1)       | /* Unconnected.       */  \
+#define VAL_GPIOBCRL    (PIN_UNDEFINED(0)    | /* SmartCard_3/5V.    */  \
+                         PIN_UNDEFINED(1)       | /* Unconnected.       */  \
                          PIN_INPUT_PUD(2)    | /* SPI1_CS.           */  \
-                         PIN_OUTPUT_PP_2(3)           | /* TDO.               */  \
-                         PIN_INPUT_PUD(4)           | /* TRST.              */  \
-                         PIN_ALTERNATE_PP_50(5)       | /* CAN2_RX  */  \
-                         PIN_ALTERNATE_PP_50(6) | /* CAN2_TX          */  \
-                         PIN_ALTERNATE_OD_10(7))  /* I2C1_SDA.          */
-#define VAL_GPIOBCRH    (PIN_INPUT_PUD(8)           | /* CAN_RX.            */  \
-                         PIN_ALTERNATE_PP_50(9) | /* CAN_TX.            */  \
-                         PIN_ALTERNATE_PP_50(10)| /* SmartCard IO.      */  \
-                         PIN_OUTPUT_PP_2(11)|           /* SPI2.CS     */  \
+                         PIN_UNDEFINED(3)           | /* TDO.               */  \
+                         PIN_UNDEFINED(4)           | /* TRST.              */  \
+                         PIN_UNDEFINED(5)       | /* CAN2_RX  */  \
+                         PIN_UNDEFINED(6) | /* CAN2_TX          */  \
+                         PIN_UNDEFINED(7))  /* I2C1_SDA.          */
+#define VAL_GPIOBCRH    (PIN_UNDEFINED(8)           | /* CAN_RX.            */  \
+                         PIN_UNDEFINED(9) | /* CAN_TX.            */  \
+                         PIN_ALTERNATE_OD_10(10)| /* SmartCard IO.      */  \
+                         PIN_ALTERNATE_OD_10(11)|           /* SPI2.CS     */  \
                          PIN_OUTPUT_PP_2(12)|           /* SPI2.CLK     */  \
                          PIN_ALTERNATE_PP_50(13)|       /* SPI2.MOSI */                    \
                          PIN_ALTERNATE_PP_50(14)|       /* SPI2.MISO.    */  \
@@ -158,10 +156,10 @@
  */
 #define VAL_GPIOCCRL    (PIN_UNDEFINED(0)       |                           \
                          PIN_UNDEFINED(1)       |                           \
-                         PIN_OUTPUT_PP_2(2)       |                           \
-                         PIN_OUTPUT_PP_2(3)       |                           \
-                         PIN_INPUT_PUD(4)          | /* Ethernet IRQ.     */  \
-                         PIN_OUTPUT_PP_2(5)       |                           \
+                         PIN_UNDEFINED(2)       |                           \
+                         PIN_UNDEFINED(3)       |                           \
+                         PIN_UNDEFINED(4)          | /* Ethernet IRQ.     */  \
+                         PIN_UNDEFINED(5)       |                           \
                          PIN_UNDEFINED(6)    | /* SmartCard CMDVCC.  */  \
                          PIN_UNDEFINED(7))            /* SmartCard OFF.     */
 #define VAL_GPIOCCRH    (PIN_UNDEFINED(8) | /* SDIO D0.           */  \

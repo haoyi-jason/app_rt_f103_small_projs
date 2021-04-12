@@ -72,6 +72,9 @@ static msg_t bal_active_balancing_voltage2()
   
   return MSG_OK;
 }
+
+static _cell_bal_state_s balCells[BS_NR_OF_BAT_CELLS_PER_MODULE];
+
 static msg_t bal_active_balancing_voltage()
 {
   uint16_t minVolt;
@@ -79,61 +82,88 @@ static msg_t bal_active_balancing_voltage()
   // find minVolt from cells that greater than balVolt;
   minVolt = 5000;
   minId = 0;
+  _nvm_board_s board;
+  _nvm_balance_cfg_s bal_config;
+  uint16_t volts[BS_NR_OF_BAT_CELLS_PER_MODULE];
+  uint16_t openWire;
+  uint16_t cellMask;
+  uint8_t nofCells;
+  
+  //nvm_get_bal_config(&bal_config);
+  nvm_get_block(PG_BOARD,(uint8_t*)&board);
+  nvm_get_block(PG_CMU_BC,(uint8_t*)&bal_config);
+  
+//  nvm_get_bal_config(&bal_config);
+//  balState.enableBalancing = bal_config.enableBalance;
+//  balState.balancingVolt = bal_config.balanceVoltMv;
+//  balState.balancingHystersis = bal_config.balanceHystersisMv;
+//  balState.OnTimeSecond = bal_config.onTime;
+//  balState.OffTimeSecond = bal_config.offTime;
+    // read voltage from bmu
+//    bmu_lte_read_cellVolt(0,12,(uint8_t*)balState.volt);
+    nvm_runtime_get_cellVoltage(volts,&nofCells);
+  nvm_runtime_get_openWireQueued(&openWire);
+  nvm_get_cellQueueEx(&cellMask);
+  openWire &= cellMask;
   for(uint8_t i = 0; i<BS_NR_OF_BAT_CELLS_PER_MODULE;i++){
-    if((balState.volt[i] > balState.balancingVolt) && (balState.volt[i] < minVolt)){
-      minVolt = balState.volt[i];
+    if((volts[i] > bal_config.balanceVoltMv) && (volts[i] < minVolt)){
+      minVolt = volts[i];
       minId = i;
     }
   }
   uint8_t balEnable[BS_NR_OF_BAT_CELLS_PER_MODULE];
-  minVolt += balState.balancingHystersis; // offset 8 mv
-  if(balState.enableBalancing){
+  minVolt = bal_config.balanceVoltMv;
+  minVolt += bal_config.balanceHystersisMv; // offset 8 mv
+  if(bal_config.enableBalance){
     for(uint8_t i=0;i<BS_NR_OF_BAT_CELLS_PER_MODULE;i++){
       balEnable[i] = 0;
-      if(balState.cells[i].timer > 0){
-        balState.cells[i].timer--;
+      if(balCells[i].timer > 0){
+        balCells[i].timer--;
+        balEnable[i] = balCells[i].dir;
       }
-
-      if(balState.volt[i] > minVolt){
-        if(balState.cells[i].timer == 0){
-          if(balState.cells[i].balancing == 1){
-            if(balState.cells[i].dir == 0){
-              balState.cells[i].dir = 1;
-              balState.cells[i].timer = balState.OnTimeSecond;
-              balEnable[i] = 1;
-            }
-            else{
-              balState.cells[i].dir = 0;
-              balState.cells[i].timer = balState.OffTimeSecond;
-            }
+      else{ // force each switch at timer == 0
+        // check if balancing
+        if(balCells[i].balancing == 1){
+          // force idle 
+          balCells[i].balancing = 0;
+          balCells[i].dir = 0; // cooldown
+          balCells[i].timer = bal_config.offTime;
+          balEnable[i] = 0;
+        }
+        else{ // not balancing
+          if(volts[i] > minVolt){
+            balCells[i].balancing = 1;
+            balCells[i].dir = 1;
+            balCells[i].timer = bal_config.onTime;
+            balEnable[i] = 1;
           }
         }
-      }else{ // stop balancing
-        balState.cells[i].balancing = 0;
-        balState.cells[i].timer = 0;
+      }
+      if(board.cellQueue[i] == 0){
+        balEnable[i] = 0;
+      }
+      if(openWire != 0){
+        balEnable[i] = 0;
+        balCells[i].balancing = 0;
+        balCells[i].dir = 0;
+        balCells[i].timer = 0;
       }
     }
   }
     
-
+  // update balancing state
+  nvm_runtime_set_balancing(balEnable);
+//  bmu_ltc_set_balance(balEnable);
   return MSG_OK;
 }
 static THD_WORKING_AREA(waBalance,512);
 static THD_FUNCTION(procBalance,p){
   (void)p;
-  _nvm_balance_cfg_s bal_config;
   chThdResume(&thd_trp, MSG_OK);
   while(1){
-    nvm_get_bal_config(&bal_config);
-    balState.enableBalancing = bal_config.enableBalance;
-    balState.balancingVolt = bal_config.balanceVoltMv;
-    balState.balancingHystersis = bal_config.balanceHystersisMv;
-    balState.OnTimeSecond = bal_config.onTime;
-    balState.OffTimeSecond = bal_config.offTime;
-    // read voltage from bmu
-//    bmu_lte_read_cellVolt(0,12,(uint8_t*)balState.volt);
-    nvm_runtime_get_cellVoltage(balState.volt,&balState.enabledCells);
     bal_active_balancing_voltage();
+    // update balancing state
+    
     chThdSleepSeconds(1); // balancing task runs every seconds
   }
   

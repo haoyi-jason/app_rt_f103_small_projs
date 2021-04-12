@@ -6,7 +6,7 @@
 #include "ntc.h"
 
 static I2CDriver *dev = &I2CD2;
-
+static thread_t *thisThd;
 const _nvm_board_s nvmBoardDefault = {
   .id = 0x01,
   .boardId = BOARD_ID,
@@ -32,12 +32,14 @@ const _nvm_ntc_cfg_s nvmNtcDefault = {
   .betaTemp = {25,25,25,25,25},
 };
 
+static struct{
+  uint8_t State;
+  uint8_t id;
+}pendTask;
 
 static _nvm_board_s nvmBoard;
 static _nvm_balance_cfg_s nvmBalance;
 static _nvm_ntc_cfg_s nvmNtc;
-
-
 
 _runtime_info_s runTime;
 
@@ -55,28 +57,30 @@ static _block_header_s nvmHeader[] = {
 };
 
 
-msg_t nvmReadPage(uint8_t page, uint8_t *d)
+static msg_t nvmReadPage(uint8_t page, uint8_t *d)
 {
   return eepromRead(page * NVM_PAGE_SIZE, NVM_PAGE_SIZE, d);
 }
 
-msg_t nvmWritePage(uint8_t page, uint8_t *d)
+static msg_t nvmWritePage(uint8_t page, uint8_t *d)
 {
   return eepromWrite(page * NVM_PAGE_SIZE, NVM_PAGE_SIZE, d);
 }
 
-msg_t nvm_read_block(uint8_t id, uint8_t *dptr, uint16_t sz)
+static msg_t nvm_read_block(uint8_t id, uint8_t *dptr, uint16_t sz)
 {
   uint8_t pg[NVM_PAGE_SIZE];
   if(id < PG_MAX){
+    //chSysLock();
     nvmReadPage(id,pg);
+    //chSysUnlock();
     memcpy(dptr,pg,sz);
     return MSG_OK;
   }
   return MSG_RESET;
 }
 
-msg_t nvm_write_block(uint8_t id, uint8_t *dptr, uint16_t sz)
+static msg_t nvm_write_block(uint8_t id, uint8_t *dptr, uint16_t sz)
 {
   uint8_t pg[NVM_PAGE_SIZE];
   if(id < PG_MAX){
@@ -101,10 +105,10 @@ msg_t nvm_runtime_set_cellVoltage(uint16_t *volts)
 msg_t nvm_runtime_get_cellVoltage(uint16_t *volts, uint8_t *n)
 {
   uint8_t used = 0;
-  for(uint8_t i=0;i<runTime.activeCells;i++){
+  for(uint8_t i=0;i<NOF_MAX_CELL_PER_MODULE;i++){
     volts[i]=runTime.cells.voltages[i];
   }
-  *n = runTime.activeCells;
+  *n = NOF_MAX_CELL_PER_MODULE;
   return MSG_OK;
 }
 
@@ -155,6 +159,18 @@ msg_t nvm_get_cellQueue(uint8_t *queue)
   return MSG_OK;
 }
 
+msg_t nvm_get_cellQueueEx(uint16_t *queue)
+{
+  uint16_t q = 0x0;
+  for(uint8_t i=0;i<NOF_MAX_CELL_PER_MODULE;i++){
+    if(nvmBoard.cellQueue[i]==1){
+      q |= (1 << i);
+    }
+  }
+  *queue = q;
+  return MSG_OK;
+}
+
 msg_t nvm_set_cellQueue(uint8_t *queue)
 {
   uint8_t active = 0;
@@ -165,8 +181,43 @@ msg_t nvm_set_cellQueue(uint8_t *queue)
     }
   }
   runTime.activeCells = active;
-  nvm_write_block(PG_BOARD,nvmHeader[PG_BOARD].block,nvmHeader[PG_BOARD].sz);
-  
+//  nvm_write_block(PG_BOARD,nvmHeader[PG_BOARD].block,nvmHeader[PG_BOARD].sz);
+  if(pendTask.State == 0){
+    pendTask.State = 2;
+    pendTask.id = PG_BOARD;
+    chEvtSignal(thisThd, EVENT_MASK(0));
+  }
+  return MSG_OK;
+}
+
+msg_t nvm_set_cellQueueEx(uint8_t *queue)
+{
+  uint8_t active = 0;
+  for(uint8_t i=0;i<8;i++){
+    if((queue[0] & (1 << i)) == (1 << i)){
+      nvmBoard.cellQueue[i] = 1;
+      active++;
+    }
+    else{
+      nvmBoard.cellQueue[i] = 0;
+    }
+  }
+  for(uint8_t i=8;i<NOF_MAX_CELL_PER_MODULE;i++){
+    if((queue[1] & (1 << (i-8))) == (1 << (i-8))){
+      nvmBoard.cellQueue[i] = 1;
+      active++;
+    }
+    else{
+      nvmBoard.cellQueue[i] = 0;
+    }
+  }
+
+  runTime.activeCells = active;
+  if(pendTask.State == 0){
+    pendTask.State = 2;
+    pendTask.id = PG_BOARD;
+    chEvtSignal(thisThd, EVENT_MASK(0));
+  }
   return MSG_OK;
 }
 
@@ -180,6 +231,12 @@ msg_t nvm_set_bal_config(_nvm_balance_cfg_s *p)
 {
   memcpy(nvmHeader[PG_CMU_BC].block,p, nvmHeader[PG_CMU_BC].sz);
   // todo : write fo eeprom
+//  nvm_write_block(PG_CMU_BC,nvmHeader[PG_CMU_BC].block,nvmHeader[PG_CMU_BC].sz);
+  if(pendTask.State == 0){
+    pendTask.State = 2;
+    pendTask.id = PG_CMU_BC;
+    chEvtSignal(thisThd, EVENT_MASK(0));
+  }
   return MSG_OK;
 }
 
@@ -195,21 +252,40 @@ msg_t nvm_set_block(uint8_t id, uint8_t *dptr)
 {
   if(id < PG_MAX){
     memcpy(nvmHeader[id].block, dptr, nvmHeader[id].sz);
-    nvm_write_block(id,nvmHeader[id].block,nvmHeader[id].sz);
+    //nvm_write_block(id,nvmHeader[id].block,nvmHeader[id].sz);
+    if(pendTask.State == 0){
+      pendTask.State = 2;
+      pendTask.id = id;
+      chEvtSignal(thisThd, EVENT_MASK(0));
+    }
+    
+  }
+  return MSG_OK;
+}
+
+msg_t nvm_runtime_get_balancingMasked(uint8_t *p)
+{
+  for(uint8_t i=0;i<NOF_MAX_CELL_PER_MODULE;i++){
+    p[i] = runTime.cells.balancing[i];
+    if(runTime.cells.state[i] == 1){
+      p[i] = 0;
+    }
   }
   return MSG_OK;
 }
 
 msg_t nvm_runtime_get_balancing(uint8_t *p)
 {
-  memcpy(p,runTime.cells.balancing,12);
+  //chSysLock();
+  memcpy(p,runTime.cells.balancing,NOF_MAX_CELL_PER_MODULE);
+  //chSysUnlock();
   return MSG_OK;
 }
 
 msg_t nvm_runtime_set_balancing(uint8_t *p)
 {
-  memcpy(runTime.cells.balancing,p,12);
-  chSysLock();
+  memcpy(runTime.cells.balancing,p,NOF_MAX_CELL_PER_MODULE);
+  //chSysLock();
   runTime.cells.balMask[0] = runTime.cells.balMask[1] = 0x0;
   uint8_t i;
   for(i=0;i<8;i++){
@@ -222,7 +298,7 @@ msg_t nvm_runtime_set_balancing(uint8_t *p)
       runTime.cells.balMask[1] |= (1 << (i-8));
     }
   }
-  chSysUnlock();
+  //chSysUnlock();
   return MSG_OK;
 }
 
@@ -230,17 +306,60 @@ msg_t nvm_runtime_get_balancingQueued(uint8_t *p)
 {
   p[0] = p[1] = 0x0;
   uint8_t i;
-  for(i=0;i<8;i++){
-    if(runTime.cells.balancing[i] == 1){
-      p[0] |= (1 << i);
-    }
-  }
-  for(i=8;i<NOF_MAX_CELL_PER_MODULE;i++){
-    if(runTime.cells.balancing[i] == 1){
-      p[1] |= (1 << (i-8));
+  uint8_t used = 0;
+  for(i=0;i<NOF_MAX_CELL_PER_MODULE;i++){
+    if((nvmBoard.cellQueue[i] == 1)){
+      if((runTime.cells.balancing[i] == 1)){
+        if(used < 8)
+          p[0] |= (1 << used);
+        else
+          p[1] |= (1 << (used-8));
+      }
+      used++;
     }
   }
   return MSG_OK;
+}
+
+msg_t nvm_runtime_set_openWire(uint8_t *p)
+{
+  uint16_t tmp = 0x0;
+  // set state to 1
+  for(uint8_t i=0;i<NOF_MAX_CELL_PER_MODULE+1;i++){
+    tmp |= (p[i]==1)?(1 << i):0;
+  }
+  runTime.cells.openWire = tmp;
+}
+
+msg_t nvm_runtime_get_openWire(uint8_t *p)
+{
+  for(uint8_t i=0;i<NOF_MAX_CELL_PER_MODULE;i++){
+    p[i] = runTime.cells.state[i] + runTime.cells.lastState[i];
+  }
+}
+
+msg_t nvm_runtime_get_openWireQueued(uint16_t *p)
+{
+  *p = runTime.cells.openWire;
+}
+
+static THD_WORKING_AREA(waNVM,512);
+static THD_FUNCTION(procNVM,p){
+
+  while(1){
+   eventmask_t evt = chEvtWaitAny(ALL_EVENTS);
+   if(pendTask.State == 1){ // read
+    nvm_read_block(pendTask.id,nvmHeader[pendTask.id].block,nvmHeader[pendTask.id].sz);
+   }
+   else if(pendTask.State == 2){ // write
+     //chSysLock();
+    nvm_write_block(pendTask.id,nvmHeader[pendTask.id].block,nvmHeader[pendTask.id].sz);
+    NVIC_SystemReset();
+    //chSysUnlock();
+   }
+   pendTask.State = 0;
+    
+  }
 }
 
 void nvmInit(I2CDriver *devp)
@@ -264,7 +383,7 @@ void nvmInit(I2CDriver *devp)
       runTime.activeCells++;
   }
   runTime.id = nvmBoard.id;
-  
+  thisThd = chThdCreateStatic(waNVM, sizeof(waNVM), NORMALPRIO-1, procNVM, NULL);
 }
 
 

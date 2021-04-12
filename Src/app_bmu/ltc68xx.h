@@ -30,7 +30,7 @@ typedef struct{
   uint16_t voltage[12]; 
   uint16_t validVolt; // bit mask
   uint32_t sumOfCells; // mv
-  uint8_t openWire[12];
+  uint8_t openWire[13];
   uint8_t activeCellQue[12];
   uint8_t activeCells;
   uint8_t state;

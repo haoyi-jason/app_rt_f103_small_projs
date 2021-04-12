@@ -6,6 +6,8 @@
 #include "bal.h"
 #include "bmu_ltc.h"
 #include "ntc.h"
+#include "bmu_tle.h"
+
 
 #define REPORT_INTERVAL_NORMAL  1000 // ms
 #define REPORT_INTERVAL_FAST    100 // ms
@@ -102,7 +104,7 @@ static void report_cb(void *arg)
   chSysUnlockFromISR();
 }
 
-static THD_WORKING_AREA(waCANRX,1024);
+static THD_WORKING_AREA(waCANRX,4096);
 static THD_FUNCTION(procCANRx,p){
  // thread_t *parent = (thread_t)p;
   CANDriver *ip = &CAND1;
@@ -127,7 +129,8 @@ static THD_FUNCTION(procCANRx,p){
   uint32_t eidActive;
   uint8_t target;
   if(nvmBoard.autoStart == 1){
-    bmu_ltc_init();
+    //bmu_ltc_init();
+    bmu_tle_init();
     balInit();
   }
           
@@ -204,6 +207,23 @@ static THD_FUNCTION(procCANRx,p){
             }
           }
         }
+        else if(eidActive == 0x134){ // set/get cell queue
+          if(rxMsg.RTR == CAN_RTR_REMOTE){
+            CANTxFrame txMsg;
+            txMsg.RTR = CAN_RTR_DATA;
+            txMsg.EID = rxMsg.EID;
+            txMsg.DLC = 8;
+            txMsg.IDE = CAN_IDE_EXT;
+            
+            nvm_get_cellQueueEx(&txMsg.data16[0]);
+            canTransmit(&CAND1,CAN_ANY_MAILBOX,&txMsg,TIME_MS2I(100));
+          }
+          else{
+            if(palReadPad(GPIOA,12) == PAL_LOW){
+              nvm_set_cellQueueEx(rxMsg.data8);
+            }
+          }
+        }
         else if(eidActive == 0x99){
           if(palReadPad(GPIOA,12) == PAL_LOW){
             nvmBoard.id = rxMsg.data8[0];
@@ -236,6 +256,8 @@ static THD_FUNCTION(procCANRx,p){
       ptx.EID = CAN_TX_SYS_STATE_0+5;
       ptx.EID |= (nvmBoard.id << 12);
       nvm_runtime_get_balancingQueued(&ptx.data8[0]);
+      nvm_runtime_get_openWireQueued(&ptx.data16[1]);
+      ptx.data16[1] >>= 1;
       canTransmit(&CAND1,CAN_ANY_MAILBOX,&ptx,TIME_MS2I(100));
     }
     

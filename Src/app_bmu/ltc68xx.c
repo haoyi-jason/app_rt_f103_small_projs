@@ -299,6 +299,10 @@ LTC68XX_ERR ltc68xx_startOpenWireMeas(LTC68XXDriver *dev, LTC_ADCMODE_e adcMode,
       result = -1;
     }
   }
+  else if(PUP == 0xff){
+    memcpy(txBuf,ltc_cmdADCV_normal_DCP0,4);
+    dev->registerWrite(dev,txBuf,4,1);
+  }
   
  
   return result;

@@ -23,8 +23,8 @@
 static thread_t *thisThd;
 static thread_reference_t thd_trp = NULL;
 
-int8_t registerRead(LTC68XXDriver *dev, uint8_t *b, uint16_t n, uint8_t cs);
-int8_t registerWrite(LTC68XXDriver *dev, uint8_t *b, uint16_t n, uint8_t cs);
+static int8_t registerRead(LTC68XXDriver *dev, uint8_t *b, uint16_t n, uint8_t cs);
+static int8_t registerWrite(LTC68XXDriver *dev, uint8_t *b, uint16_t n, uint8_t cs);
 int8_t dataExchange(LTC68XXDriver *dev, uint8_t *tx, uint16_t ntx, uint8_t *rx, uint16_t nrx);
 
 
@@ -207,9 +207,17 @@ static void LTC_SaveRXtoVoltagebuffer(uint8_t registerSet, uint8_t *rxBuffer) {
                 /* Check PEC for every LTC in the daisy-chain */
                 if (bmuState.errTable.PEC_valid == TRUE) {
                     //bmuState.cells.voltage[bmuState.usedIndex+i*(BS_NR_OF_BAT_CELLS_PER_MODULE)] = voltage;
+                  if(bmuState.reusageMeasurementMode == LTC_READ_VOLTAGES_PULLUP_OPENWIRE_CHECK){
+                    bmuState.cells.pullupFeedback[voltage_index] = voltage;
+                  }
+                  else if(bmuState.reusageMeasurementMode == LTC_REUSE_READVOLT_FOR_ADOW_PDOWN){
+                    bmuState.cells.pulldnFeedback[voltage_index] = voltage;
+                  }
+                  else{
                     bmuState.cells.voltage[voltage_index] = voltage;
                     bitmask = ~bitmask;  /* negate bitmask to only validate flags of this voltage register */
                     bmuState.cells.validVolt &= bitmask;
+                  }
                 } else {
                     /* PEC_valid == FALSE: Invalidate only flags of this voltage register */
                     bmuState.cells.validVolt |= bitmask;
@@ -515,7 +523,7 @@ static void meas_cb(void *arg)
   chSysUnlockFromISR();
 }
 
-static THD_WORKING_AREA(waBMU, 2048);
+static THD_WORKING_AREA(waBMU, 1024);
 static THD_FUNCTION(procBMU, arg) 
 {
   (void)arg;
@@ -716,6 +724,8 @@ static THD_FUNCTION(procBMU, arg)
       break;
     case LTC_STATEMACH_BALANCECONTROL:
       if (bmuState.subState == LTC_CONFIG_BALANCECONTROL) {
+          nvm_runtime_get_balancing(ltc68xx.balance->balancing_state);
+          
           ltc68xx_balanceControl(&ltc68xx);
           LTC_StateTransition(LTC_STATEMACH_BALANCECONTROL, LTC_CONFIG2_BALANCECONTROL_END, LTC_STATEMACH_SHORTTIME);
 //          LTC_StateTransition(LTC_STATEMACH_BALANCECONTROL, LTC_CONFIG2_BALANCECONTROL, (bmuState.commandDataTransferTime+LTC_TRANSMISSION_TIMEOUT));
@@ -1143,9 +1153,9 @@ static THD_FUNCTION(procBMU, arg)
           bmuState.reusageMeasurementMode = LTC_NOT_REUSED;
 
           /* Copy data from voltage struct into open-wire struct */
-          for (uint16_t i = 0; i < BS_NR_OF_BAT_CELLS; i++) {
-              bmuState.cells.pullupFeedback[i] = bmuState.cells.voltage[i];
-          }
+//          for (uint16_t i = 0; i < BS_NR_OF_BAT_CELLS; i++) {
+//              bmuState.cells.pullupFeedback[i] = bmuState.cells.voltage[i];
+//          }
 
           /* Set number of ADOW retries - send ADOW command with pull-down two times */
           bmuState.resendCommandCounter = LTC_NMBR_REQ_ADOW_COMMANDS;
@@ -1172,15 +1182,17 @@ static THD_FUNCTION(procBMU, arg)
       } else if (bmuState.subState == LTC_READ_VOLTAGES_PULLDOWN_OPENWIRE_CHECK) {
           /* Previous state: Read voltage -> information stored in voltage buffer */
           bmuState.reusageMeasurementMode = LTC_NOT_REUSED;
+          retVal = ltc68xx_startOpenWireMeas(&ltc68xx,bmuState.adcMode, 0xff);
 
           /* Copy data from voltage struct into open-wire struct */
-          for (uint16_t i = 0; i < BS_NR_OF_BAT_CELLS; i++) {
-              bmuState.cells.pulldnFeedback[i] = bmuState.cells.voltage[i];
-          }
+//          for (uint16_t i = 0; i < BS_NR_OF_BAT_CELLS; i++) {
+//              bmuState.cells.pulldnFeedback[i] = bmuState.cells.voltage[i];
+//          }
           LTC_StateTransition(LTC_STATEMACH_OPENWIRE_CHECK, LTC_PERFORM_OPENWIRE_CHECK, LTC_STATEMACH_SHORTTIME);
       } else if (bmuState.subState == LTC_PERFORM_OPENWIRE_CHECK) {
           /* Perform actual open-wire check */
 //          for (uint8_t m = 0; m < BS_NR_OF_MODULES; m++) {
+          bmuState.reusageMeasurementMode = LTC_NOT_REUSED;
             uint8_t m = 0;
               /* Open-wire at C0: cell_pup(0) == 0 */
               if (bmuState.cells.pullupFeedback[0 + (m*BS_NR_OF_BAT_CELLS_PER_MODULE)] == 0) {
@@ -1194,7 +1206,7 @@ static THD_FUNCTION(procBMU, arg)
                   bmuState.cells.openWire[BS_NR_OF_BAT_CELLS_PER_MODULE + (m*BS_NR_OF_BAT_CELLS_PER_MODULE)] = 1;
               }
               else{
-                bmuState.cells.openWire[0] = 0;
+                bmuState.cells.openWire[BS_NR_OF_BAT_CELLS_PER_MODULE] = 0;
               }
 //          }
 
@@ -1205,9 +1217,10 @@ static THD_FUNCTION(procBMU, arg)
           }
 
           /* Open-wire at C(N): delta cell(n+1) < -400mV */
+          
           for (uint8_t m = 0; m < BS_NR_OF_MODULES; m++) {
-              for (uint8_t c = 1; c < BS_NR_OF_BAT_CELLS_PER_MODULE-1; c++) {
-                  if (ltc_openwire_delta[c + (m*BS_NR_OF_BAT_CELLS_PER_MODULE)] < -400) {
+              for (uint8_t c = 1; c < BS_NR_OF_BAT_CELLS_PER_MODULE; c++) {
+                  if ((ltc_openwire_delta[c + (m*BS_NR_OF_BAT_CELLS_PER_MODULE)] < -400)) {
                       bmuState.cells.openWire[c + (m*BS_NR_OF_BAT_CELLS_PER_MODULE)] = 1;
                   }
                   else{
@@ -1215,9 +1228,16 @@ static THD_FUNCTION(procBMU, arg)
                   }
               }
           }
+          
+          for(uint8_t c=1;c < BS_NR_OF_BAT_CELLS_PER_MODULE-1 ; c++){
+            if(bmuState.cells.pullupFeedback[c] == 0){
+              bmuState.cells.openWire[c+1] = 1;
+            }
+          }
 
           /* Write database entry */
 //          DB_WriteBlock(&ltc_openwire, DATA_BLOCK_ID_OPEN_WIRE);
+          nvm_runtime_set_openWire(bmuState.cells.openWire);
           /* Start new measurement cycle */
           LTC_StateTransition(LTC_STATEMACH_STARTMEAS, LTC_ENTRY, LTC_STATEMACH_SHORTTIME);
       }
@@ -1225,7 +1245,7 @@ static THD_FUNCTION(procBMU, arg)
     default:
       break;
     }
-    chThdSleepMilliseconds(10);
+    chThdSleepMilliseconds(20);
   }
   
 }
@@ -1243,7 +1263,8 @@ msg_t bmu_ltc_init()
   nvm_get_cellQueue(bmuState.cells.activeCellQue);
   
   bmuState.usedIndex = 0;
-  thisThd = chThdCreateStatic(waBMU, sizeof(waBMU), NORMALPRIO, procBMU, NULL);
+//  thisThd = chThdCreateStatic(waBMU, sizeof(waBMU), NORMALPRIO, procBMU, NULL);
+  chThdCreateStatic(waBMU, sizeof(waBMU), NORMALPRIO, procBMU, NULL);
   chSysLock();
   msg_t ret = chThdSuspendS(&thd_trp);
   chSysUnlock();
@@ -1268,7 +1289,7 @@ void bmu_ltc_set_balance(uint8_t* val)
   }
 }
 
-int8_t registerRead(LTC68XXDriver *dev, uint8_t *b, uint16_t n, uint8_t cs)
+static int8_t registerRead(LTC68XXDriver *dev, uint8_t *b, uint16_t n, uint8_t cs)
 {
 //  spiAcquireBus(dev->config->devp);
 //  spiStart(dev->config->devp,dev->config->config);
@@ -1282,7 +1303,7 @@ int8_t registerRead(LTC68XXDriver *dev, uint8_t *b, uint16_t n, uint8_t cs)
   return 0;
 }
 
-int8_t registerWrite(LTC68XXDriver *dev, uint8_t *b, uint16_t n, uint8_t cs)
+static int8_t registerWrite(LTC68XXDriver *dev, uint8_t *b, uint16_t n, uint8_t cs)
 {
   if(b != NULL){
     spiAcquireBus(dev->config->devp);

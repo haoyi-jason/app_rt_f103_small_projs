@@ -5,6 +5,8 @@
 #include "nvm.h"
 #include "bal.h"
 #include <string.h>
+#include "lwipthread.h"
+#include "udpserver.h"
 
 static SPIConfig spicfg = {
   false,
@@ -116,7 +118,6 @@ void eep_test()
 }
 
 
-
 void main(void)
 {
   halInit();
@@ -138,9 +139,13 @@ void main(void)
   //eep_test();
 //  canTest();
   //chThdCreateStatic(waBlink, sizeof(waBlink), NORMALPRIO, procBlink, NULL);
-  cmuMgmtInit();
+  //cmuMgmtInit();
+  
 //  bmu_ltc_init();
 //  balInit();
+
+  lwipInit(NULL);
+  updServerInit();
   while(1){
     chThdSleepMilliseconds(500);
   }
