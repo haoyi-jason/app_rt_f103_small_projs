@@ -11,7 +11,7 @@ const _nvm_board_s nvmBoardDefault = {
   .id = 0x01,
   .boardId = BOARD_ID,
   .flag = FG_NORMAL,
-  .cellQueue = {1,1,1,1,0,0,1,1,1,1,0,0},     // 8-cell BMU
+  .cellQueue = {1,1,1,1,1,1,1,1,1,1,1,1},     // 8-cell BMU
   .cellVoltReportNormal = 1000,  
   .cellVoltReportFast = 100,
   .cellTempReportNormal = 5000,
@@ -21,13 +21,13 @@ const _nvm_board_s nvmBoardDefault = {
 const _nvm_balance_cfg_s nvmBalanceDefault = {
   .enableBalance = 1,
   .balanceVoltMv = 3350,
-  .onTime = 60,
-  .offTime = 60,
+  .onTime = 30,
+  .offTime = 30,
   .balanceHystersisMv = 8,
 };
 
 const _nvm_ntc_cfg_s nvmNtcDefault = {
-  .beta = {3950,3950,3950,3950,3950},
+  .beta = {3435,3435,3435,3435,3435},
   .resistance = {10,10,10,10,10}, // in unit of k
   .betaTemp = {25,25,25,25,25},
 };
@@ -190,6 +190,15 @@ msg_t nvm_set_cellQueue(uint8_t *queue)
   return MSG_OK;
 }
 
+msg_t nvm_set_default(uint8_t id)
+{
+  if(pendTask.State == 0){
+    pendTask.State = 4;
+    chEvtSignal(thisThd, EVENT_MASK(0));
+  }
+  return MSG_OK;
+}
+
 msg_t nvm_set_cellQueueEx(uint8_t *queue)
 {
   uint8_t active = 0;
@@ -343,6 +352,14 @@ msg_t nvm_runtime_get_openWireQueued(uint16_t *p)
   *p = runTime.cells.openWire;
 }
 
+void nvm_load_default()
+{
+  for(uint8_t i=0;i<PG_MAX;i++){
+    memcpy(nvmHeader[i].block,nvmHeaderDefault[i].block,nvmHeader[i].sz);
+    nvm_write_block(i,nvmHeader[i].block,nvmHeader[i].sz);
+  }
+}
+
 static THD_WORKING_AREA(waNVM,512);
 static THD_FUNCTION(procNVM,p){
 
@@ -356,6 +373,9 @@ static THD_FUNCTION(procNVM,p){
     nvm_write_block(pendTask.id,nvmHeader[pendTask.id].block,nvmHeader[pendTask.id].sz);
     NVIC_SystemReset();
     //chSysUnlock();
+   }
+   else if(pendTask.State == 4){
+     nvm_load_default();
    }
    pendTask.State = 0;
     
@@ -371,10 +391,7 @@ void nvmInit(I2CDriver *devp)
   }
   
   if((nvmBoard.boardId != BOARD_ID) || (nvmBoard.flag == FG_DEFAULT)){
-    for(uint8_t i=0;i<PG_MAX;i++){
-      memcpy(nvmHeader[i].block,nvmHeaderDefault[i].block,nvmHeader[i].sz);
-      nvm_write_block(i,nvmHeader[i].block,nvmHeader[i].sz);
-    }
+    nvm_load_default();
   }
   
   runTime.activeCells = 0;

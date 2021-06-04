@@ -26,6 +26,10 @@
 #define BOARD_AT32F4
 #define BOARD_NAME              "BMS_HVB"
 #define BOARD_ID                0x11150001
+#define FW_VERSION              0x21050701      // datecode for firmware version            
+
+#define NOF_CANFRAME_HANDLER             2
+
 
 /*
  * Board frequencies.
@@ -43,8 +47,8 @@
 #define STM32F103xB
 #define AT32F413xx
 #define AT32F4XX
-#define AT32F413Rx_HD
-//#define AT32F413Cx_MD
+//#define AT32F413Rx_HD
+#define AT32F413Cx_MD
 #define STM32_VDD 300U
 
 /*
@@ -123,7 +127,7 @@
 #define VAL_GPIOACRH    (PIN_UNDEFINED(8) | /* I2C2.SCL              */  \
                          PIN_UNDEFINED(9) | /* USART1_TX.         */  \
                          PIN_UNDEFINED(10)          | /* USART1_RX.         */  \
-                         PIN_ALTERNATE_PP_50(11)      | /* USART1_CTS            */  \
+                         PIN_INPUT_PUD(11)      | /* USART1_CTS            */  \
                          PIN_ALTERNATE_PP_50(12)      | /* USART1_RTS            */  \
                          PIN_UNDEFINED(13)          | /* Not use              */  \
                          PIN_UNDEFINED(14)          | /* not use            */  \

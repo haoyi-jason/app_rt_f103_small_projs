@@ -38,7 +38,7 @@
  * HAL driver system settings.
  */
 #define STM32_NO_INIT                       FALSE
-#define STM32_HSI_ENABLED                   TRUE
+#define STM32_HSI_ENABLED                   FALSE
 #define STM32_LSI_ENABLED                   TRUE
 #define STM32_HSE_ENABLED                   TRUE
 #define STM32_LSE_ENABLED                   FALSE
@@ -90,7 +90,7 @@
 /*
  * CAN driver system settings.
  */
-#define STM32_CAN_USE_CAN2                  FALSE       
+#define STM32_CAN_USE_CAN2                  TRUE       
 #define STM32_CAN_CAN2_IRQ_PRIORITY         11
 
 /*
@@ -140,8 +140,8 @@
  * ICU driver system settings.
  */
 #define STM32_ICU_USE_TIM1                  FALSE
-#define STM32_ICU_USE_TIM2                  FALSE
-#define STM32_ICU_USE_TIM3                  FALSE
+#define STM32_ICU_USE_TIM2                  TRUE
+#define STM32_ICU_USE_TIM3                  TRUE
 #define STM32_ICU_USE_TIM4                  FALSE
 #define STM32_ICU_USE_TIM5                  FALSE
 #define STM32_ICU_USE_TIM8                  FALSE
@@ -207,7 +207,7 @@
  * ST driver system settings.
  */
 #define STM32_ST_IRQ_PRIORITY               8
-#define STM32_ST_USE_TIMER                  2
+#define STM32_ST_USE_TIMER                  4  
 
 /*
  * UART driver system settings.
@@ -226,7 +226,7 @@
 /*
  * USB driver system settings.
  */
-#define STM32_USB_USE_USB1                  FALSE
+#define STM32_USB_USE_USB1                  TRUE
 #define STM32_USB_LOW_POWER_ON_SUSPEND      FALSE
 #define STM32_USB_USB1_HP_IRQ_PRIORITY      13
 #define STM32_USB_USB1_LP_IRQ_PRIORITY      14

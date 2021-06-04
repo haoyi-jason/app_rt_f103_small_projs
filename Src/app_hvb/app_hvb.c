@@ -4,6 +4,26 @@
 #include <string.h>
 #include "ads1015.h"
 #include "at32_flash.h"
+#include "can_frame_handler.h"
+
+
+
+int8_t config_handler(CANRxFrame *prx,CANTxFrame *ptx);
+int8_t id_handler(CANRxFrame *prx,CANTxFrame *ptx);
+int8_t digital_input_handler(CANRxFrame *prx,CANTxFrame *ptx);
+int8_t digital_output_handler(CANRxFrame *prx,CANTxFrame *ptx);
+int8_t analog_input_handler(CANRxFrame *prx,CANTxFrame *ptx);
+int8_t analog_output_handler(CANRxFrame *prx,CANTxFrame *ptx);
+int8_t power_output_handler(CANRxFrame *prx,CANTxFrame *ptx);
+
+struct can_frame_handler PacketHandler[] = {
+  {0x99,id_handler},
+//  {0x140,digital_output_handler},
+//  {0x141,digital_input_handler},
+//  {0x150,analog_output_handler},
+  {0x160,analog_input_handler},  
+//  {0x180,power_output_handler},  
+};
 
 
 static SPIConfig spicfg = {
@@ -45,8 +65,12 @@ ADS1x15Driver ads1115 = {
   &ads1115_config,
   0x8583,
   0x0,
+  0x1,
   ADS1015_ADDR_GND
 };
+
+#define NOF_ADC_CH      4
+#define NOF_AVERAGE     8
 
 struct{
   uint8_t id;
@@ -55,91 +79,17 @@ struct{
   uint16_t current;
   thread_t *canThread;
   thread_t *adsThread;
+  int32_t analogAccum[8];       // accumulated raw data 
+  int16_t analogIn[8]; //  ads1115 raw data
+  int16_t analogResult[8]; // physical value, adc_value * analog_transfer
 }runTime;
 
 struct{
-  uint32_t flag;
-  uint8_t devID;
+  uint8_t flag;
+  uint8_t id;
+  uint32_t boardId;
+  struct analog_transfer adc_transfer[8];
 }nvmParam;
-
-
-void spiTest()
-{
-  SPIDriver *dev = &SPID2;
-  uint8_t tx[32];
-  uint8_t reg = 0x1;
-  for(uint8_t i=0;i<32;i++)
-    tx[i] = i*4;
-  spiAcquireBus(dev);
-  spiStart(dev,&spicfg);
-  spiSelect(dev);
-  spiSend(dev,32,tx);
-//  spiReceive(dev->config->devp,n,b);
-  spiUnselect(dev);
-  spiStop(dev);
-  spiReleaseBus(dev);
-  
-}
-
-void serialTest()
-{
-  
-//  sdStart(&SD1,&serialcfg);
-//  for(uint8_t i=0;i<10;i++){
-//    sdWrite(&SD1,"Hello\n",5);
-//    chThdSleepMilliseconds(100);
-//  }
-
-}
-
-typedef struct{
-  uint32_t pgn;
-  uint8_t buffer[8];
-  uint8_t len;
-  uint8_t dst;
-  uint8_t src;
-  uint8_t prio;
-}j1939_msg_t;
-
-static msg_t canSend(CANDriver *p, j1939_msg_t *m)
-{
-  CANTxFrame ptx;
-  uint8_t i;
-  
-  ptx.EID = (m->prio << 26) | (m->pgn << 8) | m->src;
-  ptx.IDE = CAN_IDE_EXT;
-  ptx.RTR = CAN_RTR_DATA;
-  ptx.DLC = m->len;
-  memcpy(ptx.data8,m->buffer,m->len);
-  
-  return canTransmit(p,CAN_ANY_MAILBOX,&ptx,TIME_MS2I(100));
-}
-
-void canTest()
-{
-  canStart(&CAND1,&canCfg250K);
-  //canStart(&CAND2,&canCfg500K);
-
-  j1939_msg_t msg;
-//  msg.dst = 0x1234;
-//  msg.pgn = 100;
-//  msg.src =  0x5678;
-//  msg.buffer[0] = 0x11;
-//  msg.buffer[1] = 0x22;
-//  msg.buffer[2] = 0x33;
-//  msg.buffer[3] = 0x44;
-//  msg.buffer[4] = 0x55;
-//  msg.buffer[5] = 0x66;
-//  msg.buffer[6] = 0x77;
-//  msg.buffer[7] = 0x88;
-//  msg.len = 8;
-  
-  for(uint8_t i=0;i<10;i++){
-    canSend(&CAND1,&msg);
-    msg.buffer[0]++;
-  }
-  //canSend(&CAND2,&msg);
-}
 
 void eep_test()
 {
@@ -153,17 +103,32 @@ void nvmRead()
 
 void nvmWrite()
 {
+  chSysLock();
   flash_Write(FLASH_START_ADDRESS,(uint16_t*)&nvmParam,sizeof(nvmParam)/2);
+  chSysUnlock();
+}
+
+void nvmLoadDefault()
+{
+  nvmParam.flag = 0x55;
+  nvmParam.boardId = BOARD_ID;
+  nvmParam.id = 0x3F;  // for HVB, ID always = 0x1f (31d) for group 1 to 6 (3-bit MSB)
+  for(uint8_t i=0;i<8;i++){
+    nvmParam.adc_transfer[i].raw_low = 0;
+    nvmParam.adc_transfer[i].raw_high = 32767;
+    nvmParam.adc_transfer[i].eng_low = 0.0;
+    nvmParam.adc_transfer[i].eng_high = 100.0;
+    nvmParam.adc_transfer[i].factor = 100;
+  }
+  
 }
 
 void nvmFlashInit()
 {
   nvmRead(); // load nvm
-  if(nvmParam.flag != 0x53290921){
+  if(nvmParam.flag != 0x55){
     // load default
-    nvmParam.flag = 0x53290921;
-    nvmParam.devID = 0x01;
-    
+    nvmLoadDefault();
     nvmWrite();
   }
 }
@@ -172,11 +137,11 @@ static thread_t *canThread;
 static thread_t *adThread;
 
 static virtual_timer_t vtReport;
-static uint16_t reportMS;
+static uint16_t reportMS=1000;
 static void report_cb(void *arg)
 {
   chSysLockFromISR();
-  chEvtSignalI(canThread, EVENT_MASK(1));
+  chEvtSignalI(runTime.canThread, EVENT_MASK(1));
   chVTSetI(&vtReport,TIME_MS2I(reportMS),report_cb,NULL);
   chSysUnlockFromISR();
 }
@@ -193,6 +158,7 @@ static THD_FUNCTION(procCANBUS,p){
   chVTObjectInit(&vtReport);
   chVTSet(&vtReport,TIME_MS2I(1000),report_cb,NULL);
   
+  canStart(ip,&canCfg250K);
   bool bRun = true;
   while(bRun){
     
@@ -201,14 +167,13 @@ static THD_FUNCTION(procCANBUS,p){
       while(canReceive(ip,CAN_ANY_MAILBOX,&rxMsg,TIME_IMMEDIATE) == MSG_OK){
         uint16_t eidActive = rxMsg.EID & 0xFFF;
         uint8_t dest = (rxMsg.EID >> 12) & 0xFF;
-        if(eidActive == 0x131){ // report speed
-          
+        if(dest != nvmParam.id) continue;
+        if(findHandlerByID(eidActive, &rxMsg,&ptx)>0){
+          ptx.EID = (nvmParam.id << 12) | eidActive;
+          canTransmit(ip,CAN_ANY_MAILBOX,&ptx,TIME_MS2I(100));
         }
-        else if(eidActive == 0x99){ // set id
-          
-        }
-        else if(eidActive == 0x140){ // set params
-          
+        else{ // not suupported function
+          // do nothing
         }
       }
     }
@@ -217,11 +182,14 @@ static THD_FUNCTION(procCANBUS,p){
       // voltage: 16-bit unsigned, in unit of 0.1 v
       // current: 16-bit unsigned, in unit of 0.1 A
       // other 2 16-bit data for temperature
-      ptx.EID = runTime.id << 12;
-      ptx.EID |= 0x111; // todo: define message id
-      chSysLock();
-      ptx.data16[0] = runTime.voltage;
-      ptx.data16[1] = runTime.current;
+      ptx.EID = nvmParam.id << 12;
+      ptx.EID |= 0x120; // todo: define message id
+      ptx.IDE = CAN_IDE_EXT;
+      ptx.DLC = 8;
+      ptx.RTR = CAN_RTR_DATA;
+      for(uint8_t i=0;i<4;i++){
+        ptx.data16[i] = runTime.analogResult[i];
+      }
       canTransmit(ip, CAN_ANY_MAILBOX,&ptx,TIME_MS2I(100));
     }
     
@@ -236,17 +204,36 @@ static THD_FUNCTION(procCANBUS,p){
   
 };
 
+float engTransfer(int id)
+{
+  float ret = 0.;
+  struct analog_transfer *t = &nvmParam.adc_transfer[id];
+  uint16_t raw = runTime.analogIn[id];
+  if(raw < t->raw_low){
+    ret = t->eng_low;
+  }
+  else if(raw >= t->raw_high){
+    ret = t->eng_high;
+  }
+  else{
+    ret = t->eng_low + (runTime.analogIn[id] - t->raw_low)*(t->eng_high - t->eng_low)/(t->raw_high - t->raw_low);
+  }
+  return ret;
+}
+
 static THD_WORKING_AREA(waADS1115,1024);
 static THD_FUNCTION(procADS1115,p){
   (void)p;
   uint16_t volts[8];
   uint16_t amps[8];
-  ads1015_set_pga(&ads1115,PGA_4_096);
+  ads1015_set_pga(&ads1115,PGA_6_144);
   ads1015_set_mode(&ads1115,MODE_SINGLE);
+//  ads1015_set_thresLow(&ads1115);
+//  ads1015_set_thresHigh(&ads1115);
   uint8_t voltIndex = 0, ampIndex = 0;
   bool bRun = true;
   uint8_t state = 0;
-  uint16_t voltSum,ampSum;
+  int32_t voltSum,ampSum;
   while(bRun){
     switch(state){
     case 0:
@@ -255,8 +242,7 @@ static THD_FUNCTION(procADS1115,p){
       state++;
       break;
     case 1:
-      volts[voltIndex++] = ads1015_read_data(&ads1115);
-      if(voltIndex == 8) voltIndex = 0;
+      runTime.analogIn[0] = ads1015_read_data(&ads1115);
       state++;
       break;
     case 2:
@@ -265,18 +251,34 @@ static THD_FUNCTION(procADS1115,p){
       state++;
       break;
     case 3:
-      amps[ampIndex++] = ads1015_read_data(&ads1115);
-      if(ampIndex == 8) ampIndex = 0;
+      runTime.analogIn[1] = ads1015_read_data(&ads1115);
       state++;
       break;
     case 4:
-      voltSum = ampSum = 0;
-      for(uint8_t i=0;i<8;i++){
-        voltSum += volts[i];
-        ampSum += amps[i];
+      ads1015_set_mux(&ads1115,MUX_AIN2_GND);
+      ads1015_start_conversion(&ads1115);
+      state++;
+      break;
+    case 5:
+      runTime.analogIn[2] = ads1015_read_data(&ads1115);
+      state++;
+      break;
+    case 6:
+      ads1015_set_mux(&ads1115,MUX_AIN3_GND);
+      ads1015_start_conversion(&ads1115);
+      state++;
+      break;
+    case 7:
+      runTime.analogIn[3] = ads1015_read_data(&ads1115);
+      state++;
+      break;
+    case 8:
+      for(uint8_t i=0;i< NOF_ADC_CH;i++){
+//        runTime.analogResult[i] = (int16_t)(nvmParam.adc_transfer[i].eng_high - nvmParam.adc_transfer[i].eng_low)*(runTime.analogIn[i] - nvmParam.adc_transfer[i].raw_low)/(nvmParam.adc_transfer[i].raw_high - nvmParam.adc_transfer[i].raw_low);
+        runTime.analogResult[i] = (int16_t)engTransfer(i);
       }
-      runTime.voltage = voltSum / 8;
-      runTime.current = ampSum / 8;
+      runTime.voltage = runTime.analogResult[3];
+      runTime.current = runTime.analogResult[2];
       state = 0;
       break;
     }
@@ -296,9 +298,9 @@ void main(void)
   chSysInit();
   
   // remapI2C2
-  AFIO->MAP5 |= AFIO_MAP5_I2C2_GRMP_10;
-  AFIO->MAP6 |= AFIO_MAP6_CAN1_GRMP;
-  AFIO->MAP6 |= AFIO_MAP6_CAN2_GRMP;
+  //AFIO->MAP5 |= AFIO_MAP5_I2C2_GRMP_10;
+  //AFIO->MAP6 |= AFIO_MAP6_CAN1_GRMP;
+  //AFIO->MAP6 |= AFIO_MAP6_CAN2_GRMP;
   
   //nvmInit(&I2CD2);
   nvmFlashInit();
@@ -321,4 +323,112 @@ void main(void)
   while(1){
     chThdSleepMilliseconds(500);
   }
+}
+
+int8_t id_handler(CANRxFrame *prx,CANTxFrame *ptx)
+{
+  // only group can be changed
+   if(prx->RTR == CAN_RTR_REMOTE){
+    ptx->RTR = CAN_RTR_DATA;
+    ptx->DLC = 8;
+    ptx->IDE = CAN_IDE_EXT;
+    ptx->data32[0] = BOARD_ID;
+    ptx->data32[1] = FW_VERSION;
+    return 1;
+  }
+  else{
+    uint8_t b1 = prx->data8[0];
+    uint8_t b2 = ~prx->data8[1];
+    if(b1 == b2){
+      uint8_t gid = prx->data8[2] >> 5;
+      uint8_t id = prx->data8[2] & 0x1f;
+      if((id == 0x1F) && (gid > 0)){
+        nvmParam.id = prx->data8[2];
+        nvmWrite();
+      }
+    }
+    else if(prx->DLC == 8){
+      bool valid = true;
+      for(uint8_t i=0;i<4;i++){
+        if(prx->data8[i*2] != 0x55)
+          valid = false;
+        if(prx->data8[i*2+1] != 0xAA)
+          valid = false;
+      }
+      if(valid){
+        nvmLoadDefault();
+      }
+    }
+  }
+  return 0;
+ 
+}
+
+int8_t config_handler(CANRxFrame *prx,CANTxFrame *ptx)
+{
+  return 0;
+}
+int8_t digital_input_handler(CANRxFrame *prx,CANTxFrame *ptx)
+{
+  return 0;
+}
+int8_t digital_output_handler(CANRxFrame *prx,CANTxFrame *ptx)
+{
+  return 0;
+}
+int8_t analog_input_handler(CANRxFrame *prx,CANTxFrame *ptx)
+{
+  if(ptx->RTR == CAN_RTR_REMOTE){
+    uint8_t idx = prx->EID & 0xFF;
+    switch(idx){
+    case 0:     // adc raw data, ch 0~3
+      ptx->data16[0] = runTime.analogIn[0];
+      ptx->data16[1] = runTime.analogIn[1];
+      ptx->data16[2] = runTime.analogIn[2];
+      ptx->data16[3] = runTime.analogIn[3];
+      ptx->DLC = 8;
+      break;
+    case 1:     // adc raw data, ch 4~7
+      ptx->data16[0] = runTime.analogIn[4];
+      ptx->data16[1] = runTime.analogIn[5];
+      ptx->data16[2] = runTime.analogIn[6];
+      ptx->data16[3] = runTime.analogIn[7];
+      ptx->DLC = 8;
+      break;
+    }
+    return 1;
+  }
+  else{ // adc channel config
+    uint8_t ch = prx->data8[0];
+    uint8_t opt = prx->data8[1];  
+    if(ch < 4){
+      switch(opt){
+      case 0: // raw low;
+        nvmParam.adc_transfer[ch].raw_low = prx->data16[1];
+        break;
+      case 1: // raw_high
+        nvmParam.adc_transfer[ch].raw_high = prx->data16[1];
+        break;
+      case 2: // eng_low, float
+        memcpy(&nvmParam.adc_transfer[ch].eng_low,(void*)&prx->data8[2],4);
+        break;
+      case 3: // eng high, float
+        memcpy(&nvmParam.adc_transfer[ch].eng_high,(void*)&prx->data8[2],4);
+        break;
+      default:break;
+      }
+    }
+    else if(ch == 0x99){ // save
+      nvmWrite();
+    }
+  }
+  return 0;
+}
+int8_t analog_output_handler(CANRxFrame *prx,CANTxFrame *ptx)
+{
+  return 0; // not supported
+}
+int8_t power_output_handler(CANRxFrame *prx,CANTxFrame *ptx)
+{
+  return 0; 
 }

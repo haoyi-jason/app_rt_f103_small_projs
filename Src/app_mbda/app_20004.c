@@ -757,7 +757,7 @@ static THD_FUNCTION(procCmdParse, arg) {
         while(!found){
           query_target++;
           if(query_target == NOF_MAP_QUERY) query_target = 0;
-          if(appParam.nvm.map[query_target].enabled){
+          if(appParam.nvm.map[query_target].enabled == 1){
             found = true;
           }
         }

@@ -47,3 +47,68 @@ void __early_init(void) {
 void boardInit(void) {
 }
 
+void board_relay_set(uint8_t x)
+{
+  switch(x){
+  case 0:palSetLine(LINE_RELAY_OUT_0);
+    break;
+  case 1:palSetLine(LINE_RELAY_OUT_1);
+    break;
+  default:break;
+  }
+}
+void board_relay_clr(uint8_t x)
+{
+  switch(x){
+  case 0:palClearLine(LINE_RELAY_OUT_0);
+    break;
+  case 1:palClearLine(LINE_RELAY_OUT_1);
+    break;
+  default:break;
+  }
+}
+void board_power_set(uint8_t x)
+{
+  switch(x){
+  case 0:palSetLine(LINE_VSOURCE_0);
+    break;
+  case 1:palSetLine(LINE_VSOURCE_1);
+    break;
+  default:break;
+  }
+}
+void board_power_clr(uint8_t x)
+{
+  switch(x){
+  case 0:palClearLine(LINE_VSOURCE_0);
+    break;
+  case 1:palClearLine(LINE_VSOURCE_1);
+    break;
+  default:break;
+  }
+}
+void baord_adc_reset()
+{
+  palClearLine(LINE_AD5593_RST);
+  chThdSleepMilliseconds(5);
+  palSetLine(LINE_AD5593_RST);
+}
+
+int8_t board_input_state(uint8_t x)
+{
+  switch(x){
+  case 0:return palReadLine(LINE_ISO_DI_0)==PAL_HIGH?0:1;break;
+  case 1:return palReadLine(LINE_ISO_DI_1)==PAL_HIGH?0:1;break;
+  default: return 0;break;
+  }
+}
+
+int8_t board_output_state(uint8_t x)
+{
+  switch(x){
+  case 0:return palReadLine(LINE_RELAY_OUT_0)==PAL_HIGH?1:0;break;
+  case 1:return palReadLine(LINE_RELAY_OUT_1)==PAL_HIGH?1:0;break;
+  default: return 0;break;
+  }
+}
+

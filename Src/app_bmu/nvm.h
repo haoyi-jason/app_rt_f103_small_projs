@@ -108,4 +108,6 @@ msg_t nvm_runtime_get_balancingQueued(uint8_t *p);
 
 void nvmInit(I2CDriver *devp);
 
+msg_t nvm_set_default(uint8_t id);
+
 #endif

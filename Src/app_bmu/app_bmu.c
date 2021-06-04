@@ -130,22 +130,11 @@ void main(void)
   
   nvmInit(&I2CD2);
   
-//  palClearPad(GPIOB,12);
-//  palSetPad(GPIOB,12);
-//  palClearPad(GPIOB,12);
-//  palSetPad(GPIOB,12);
-  //spiTest();
-//  serialTest();
-  //eep_test();
-//  canTest();
-  //chThdCreateStatic(waBlink, sizeof(waBlink), NORMALPRIO, procBlink, NULL);
-  //cmuMgmtInit();
+  cmuMgmtInit();
   
-//  bmu_ltc_init();
-//  balInit();
 
-  lwipInit(NULL);
-  updServerInit();
+//  lwipInit(NULL);
+//  updServerInit();
   while(1){
     chThdSleepMilliseconds(500);
   }

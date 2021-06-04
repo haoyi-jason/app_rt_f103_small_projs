@@ -26,9 +26,11 @@
 #define BOARD_AT32F4
 #define BOARD_NAME              "BMU-6811"
 #define BOARD_ID                0x06080002
+#define FW_VERSION              0x21042101
 
 #define NOF_MAX_CELL_PER_MODULE         12
 #define NOF_MAX_AUXIO                   5
+#define NOF_CANFRAME_HANDLER             6
 
 /*
  * Board frequencies.
@@ -124,7 +126,7 @@
                          PIN_ALTERNATE_PP_50(7))  /* SPI1_MOSI.         */
 #define VAL_GPIOACRH    (PIN_ALTERNATE_OD_10(8) | /* I2C2.SCL              */  \
                          PIN_OUTPUT_PP_50(9) | /* USART1_TX.         */  \
-                         PIN_INPUT(10)          | /* USART1_RX.         */  \
+                         PIN_UNDEFINED(10)          | /* USART1_RX.         */  \
                          PIN_INPUT_PUD(11)      | /* USART1_CTS            */  \
                          PIN_INPUT_PUD(12)      | /* USART1_RTS            */  \
                          PIN_UNDEFINED(13)          | /* Not use              */  \

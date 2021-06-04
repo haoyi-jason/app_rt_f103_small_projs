@@ -166,7 +166,7 @@ static THD_FUNCTION(procBMU, arg)
       if(bmuState.subState == TLE_START_INIT_INITIALIZATION){
         tle9012_init(&tle9012);
         bmuState.lastSubState = bmuState.subState;
-        TLE_StateTransition(TLE_STATEMACH_INITIALIZATION, TLE_EXIT_INITIALIZATION,bmuState.commonDataTransferTime);
+        //TLE_StateTransition(TLE_STATEMACH_INITIALIZATION, TLE_EXIT_INITIALIZATION,bmuState.commonDataTransferTime);
       }
       else if(bmuState.subState == TLE_EXIT_INITIALIZATION){
         TLE_SAVELASTSTATES();
@@ -247,7 +247,7 @@ static int8_t registerRead(TLE9012Driver *dev, uint8_t *b, uint8_t n, uint32_t t
 static int8_t registerWrite(TLE9012Driver *dev, uint8_t *b, uint8_t n, uint32_t timeout)
 {
   if(dev->config->devp){
-    sdWriteTimeout(dev->config->devp,b,n,timeout);
+    sdWriteTimeout(dev->config->devp,b,n,TIME_MS2I(timeout));
     return 0;
   }
   return -1;

@@ -7,10 +7,30 @@
 #include "bmu_ltc.h"
 #include "ntc.h"
 #include "bmu_tle.h"
-
+#include "can_frame_handler.h"
 
 #define REPORT_INTERVAL_NORMAL  1000 // ms
 #define REPORT_INTERVAL_FAST    100 // ms
+
+int8_t config_handler(CANRxFrame *prx,CANTxFrame *ptx);
+int8_t id_handler(CANRxFrame *prx,CANTxFrame *ptx);
+int8_t report_config_handler(CANRxFrame *prx,CANTxFrame *ptx);
+int8_t balancing_config_handler(CANRxFrame *prx,CANTxFrame *ptx);
+int8_t ntc_config_handler(CANRxFrame *prx,CANTxFrame *ptx);
+int8_t cell_queue_config_handler(CANRxFrame *prx,CANTxFrame *ptx);
+//int8_t power_output_handler(CANRxFrame *prx,CANTxFrame *ptx);
+
+
+struct can_frame_handler PacketHandler[] = {
+  {0x01,config_handler},
+  {0x99,id_handler},
+  {0x131,report_config_handler},
+  {0x132,balancing_config_handler},
+  {0x133,ntc_config_handler},
+  {0x134,cell_queue_config_handler},  
+//  {0x180,power_output_handler},  
+};
+
 
 static thread_t *thisThd;
 static _nvm_board_s nvmBoard;
@@ -127,10 +147,10 @@ static THD_FUNCTION(procCANRx,p){
   _nvm_balance_cfg_s bal_config;
   nvmBoard.autoStart = 1;
   uint32_t eidActive;
-  uint8_t target;
+  uint8_t dest;
   if(nvmBoard.autoStart == 1){
-    //bmu_ltc_init();
-    bmu_tle_init();
+//    bmu_tle_init();
+    bmu_ltc_init();
     balInit();
   }
           
@@ -142,94 +162,52 @@ static THD_FUNCTION(procCANRx,p){
     if(evt & 0x01){
       while(canReceive(ip,CAN_ANY_MAILBOX,&rxMsg,TIME_IMMEDIATE) == MSG_OK){
         eidActive = rxMsg.EID & 0xFFF;
-        target = (rxMsg.EID>>12)&0xff;
-        if(eidActive == 0x131){ // set report speed
-          uint16_t tmp = rxMsg.data16[0];
-          if((tmp >= 100) && (tmp <= 10000)){
-            chSysLock();
-            reportMS = tmp;
-            chSysUnlock();
+        dest = (rxMsg.EID>>12)&0xff;
+        if((dest == nvmBoard.id) || (dest == 0x00)){
+          if(findHandlerByID(eidActive, &rxMsg,&ptx)>0){
+            ptx.EID = (nvmBoard.id << 12) | eidActive;
+            canTransmit(ip,CAN_ANY_MAILBOX,&ptx,TIME_MS2I(100));
           }
         }
-        else if(eidActive == 0x132){ // set balancing volt, hystersis time and difference 
-          nvm_get_bal_config(&bal_config);
-          uint16_t v;
-          if(rxMsg.RTR == CAN_RTR_REMOTE){
-            CANTxFrame txMsg;
-            txMsg.RTR = CAN_RTR_DATA;
-            txMsg.EID = rxMsg.EID;
-            txMsg.DLC = 8;
-            txMsg.IDE = CAN_IDE_EXT;
-            
-            txMsg.data16[0] = bal_config.balanceVoltMv;
-            txMsg.data8[2] = bal_config.balanceHystersisMv;
-            txMsg.data8[3] = bal_config.enableBalance;
-            txMsg.data16[2] = bal_config.onTime;
-            txMsg.data16[3] = bal_config.offTime;
-            canTransmit(&CAND1,CAN_ANY_MAILBOX,&txMsg,TIME_MS2I(100));
-          }
-          else{
-            bal_config.balanceVoltMv = rxMsg.data16[0];
-            bal_config.balanceHystersisMv = (uint8_t)rxMsg.data8[2];
-            bal_config.enableBalance = rxMsg.data8[3] == 0x0?0x0:0x1;
-            bal_config.onTime = rxMsg.data16[2];
-            bal_config.offTime = rxMsg.data16[3];
-            nvm_set_bal_config(&bal_config);
-          }
-        }
-        else if(eidActive == 0x133){ // set resistance beta and beta temp of NTC
-          _nvm_ntc_cfg_s ntc;
-          nvm_get_block(PG_CMU_TC,(uint8_t*)&ntc);
-          if(rxMsg.RTR == CAN_RTR_REMOTE){
-            CANTxFrame txMsg;
-            txMsg.RTR = CAN_RTR_DATA;
-            txMsg.EID = rxMsg.EID;
-            txMsg.DLC = 8;
-            txMsg.IDE = CAN_IDE_EXT;
-            
-            txMsg.data16[0] = ntc.resistance[0];
-            txMsg.data16[1] = ntc.beta[0];
-            txMsg.data8[4] = ntc.betaTemp[0];
-            canTransmit(&CAND1,CAN_ANY_MAILBOX,&txMsg,TIME_MS2I(100));
-          }
-          else{
-            if(palReadPad(GPIOA,12) == PAL_LOW){
-              for(uint8_t i=0;i<NOF_MAX_AUXIO;i++){
-                ntc.resistance[i] = rxMsg.data16[0];
-              }
-              for(uint8_t i=0;i<NOF_MAX_AUXIO;i++){
-                ntc.beta[i] = rxMsg.data16[1];
-              }
-              for(uint8_t i=0;i<NOF_MAX_AUXIO;i++){
-                ntc.betaTemp[i] = rxMsg.data8[4];
-              }
-              nvm_set_block(PG_CMU_TC,(uint8_t*)&ntc);
-            }
-          }
-        }
-        else if(eidActive == 0x134){ // set/get cell queue
-          if(rxMsg.RTR == CAN_RTR_REMOTE){
-            CANTxFrame txMsg;
-            txMsg.RTR = CAN_RTR_DATA;
-            txMsg.EID = rxMsg.EID;
-            txMsg.DLC = 8;
-            txMsg.IDE = CAN_IDE_EXT;
-            
-            nvm_get_cellQueueEx(&txMsg.data16[0]);
-            canTransmit(&CAND1,CAN_ANY_MAILBOX,&txMsg,TIME_MS2I(100));
-          }
-          else{
-            if(palReadPad(GPIOA,12) == PAL_LOW){
-              nvm_set_cellQueueEx(rxMsg.data8);
-            }
-          }
-        }
-        else if(eidActive == 0x99){
-          if(palReadPad(GPIOA,12) == PAL_LOW){
-            nvmBoard.id = rxMsg.data8[0];
-            nvm_set_block(PG_BOARD,(uint8_t*)&nvmBoard);
-          }
-        }
+        
+//        if(eidActive == 0x131){ // set report speed
+//        }
+//        else if(eidActive == 0x132){ // set balancing volt, hystersis time and difference 
+//        }
+//        else if(eidActive == 0x133){ // set resistance beta and beta temp of NTC
+//        }
+//        else if(eidActive == 0x134){ 
+//        }
+//        else if(eidActive == 0x99){
+//          if(rxMsg.RTR == CAN_RTR_REMOTE){
+//            CANTxFrame txMsg;
+//            txMsg.EID = eidActive | (nvmBoard.id << 12);
+//            txMsg.RTR = CAN_RTR_DATA;
+//            txMsg.DLC = 8;
+//            txMsg.IDE = CAN_IDE_EXT;
+//            txMsg.data32[0] = BOARD_ID;
+//            txMsg.data32[1] = FW_VERSION;
+//            canTransmit(&CAND1,CAN_ANY_MAILBOX,&txMsg,TIME_MS2I(100));
+//          }
+//          else{
+//            if(palReadPad(GPIOA,12) == PAL_LOW){
+//              nvmBoard.id = rxMsg.data8[0];
+//              nvm_set_block(PG_BOARD,(uint8_t*)&nvmBoard);
+//            }
+//            else{
+//              bool valid = true;
+//              for(uint8_t i=0;i<4;i++){
+//                if(rxMsg.data8[i*2] != 0x55)
+//                  valid = false;
+//                if(rxMsg.data8[i*2+1] != 0xAA)
+//                  valid = false;
+//              }
+//              if(valid){
+//                nvm_set_default(0);
+//              }
+//            }
+//          }
+//        }
       }
     }
     if(evt & 0x02){
@@ -282,3 +260,159 @@ void cmuMgmtInit(void)
 //  thisThd = chThdCreateStatic(waMGMT, sizeof(waMGMT), NORMALPRIO, procMGMT, NULL);
   thisThd = chThdCreateStatic(waCANRX, sizeof(waCANRX), NORMALPRIO, procCANRx, NULL);
 }
+
+int8_t config_handler(CANRxFrame *prx,CANTxFrame *ptx)
+{
+  if(prx->RTR == CAN_RTR_DATA){
+    switch(prx->data8[0]){
+    case 0x99: // save data
+      //nvmWrite();
+      //nvmParamPowerUp();
+      break;
+    default:break;
+    }
+  }
+  return 0;
+}
+int8_t id_handler(CANRxFrame *prx,CANTxFrame *ptx)
+{
+  if(prx->RTR == CAN_RTR_REMOTE){
+    ptx->RTR = CAN_RTR_DATA;
+    ptx->DLC = 8;
+    ptx->IDE = CAN_IDE_EXT;
+    ptx->data32[0] = BOARD_ID;
+    ptx->data32[1] = FW_VERSION;
+    return 1;
+  }
+  else{
+    uint8_t b1 = prx->data8[0];
+    uint8_t b2 = ~prx->data8[1];
+    if(b1 == b2){
+      uint8_t gid = prx->data8[2] >> 5;
+      uint8_t id = prx->data8[2] & 0x1f;
+      if((id >0) && (gid > 0)){
+        nvmBoard.id = prx->data8[2];
+        nvm_set_block(PG_BOARD,(uint8_t*)&nvmBoard);
+      }
+    }
+    else{
+      bool valid = true;
+      for(uint8_t i=0;i<4;i++){
+        if(prx->data8[i*2] != 0x55)
+          valid = false;
+        if(prx->data8[i*2+1] != 0xAA)
+          valid = false;
+      }
+      if(valid){
+        nvm_set_default(0);
+      }
+    }
+  }
+  return 0;
+}
+
+// set report speed
+int8_t report_config_handler(CANRxFrame *prx,CANTxFrame *ptx)
+{
+  if(prx->RTR == CAN_RTR_REMOTE){
+    
+  }
+  else{
+    uint16_t tmp = prx->data16[0];
+    if((tmp >= 100) && (tmp <= 10000)){
+      chSysLock();
+      reportMS = tmp;
+      chSysUnlock();
+    }
+  }
+  return 0;
+}
+
+// set balancing volt, hystersis time and difference 
+int8_t balancing_config_handler(CANRxFrame *prx,CANTxFrame *ptx)
+{
+  _nvm_balance_cfg_s bal_config;
+  nvm_get_bal_config(&bal_config);
+  uint16_t v;
+  if(prx->RTR == CAN_RTR_REMOTE){
+//    CANTxFrame txMsg;
+//    txMsg.EID = eidActive | (nvmBoard.id << 12);
+    ptx->RTR = CAN_RTR_DATA;
+    ptx->DLC = 8;
+    ptx->IDE = CAN_IDE_EXT;
+    
+    ptx->data16[0] = bal_config.balanceVoltMv;
+    ptx->data8[2] = bal_config.balanceHystersisMv;
+    ptx->data8[3] = bal_config.enableBalance;
+    ptx->data16[2] = bal_config.onTime;
+    ptx->data16[3] = bal_config.offTime;
+    return 1;
+//    canTransmit(&CAND1,CAN_ANY_MAILBOX,&txMsg,TIME_MS2I(100));
+  }
+  else{
+    bal_config.balanceVoltMv = prx->data16[0];
+    bal_config.balanceHystersisMv = (uint8_t)prx->data8[2];
+    bal_config.enableBalance = prx->data8[3] == 0x0?0x0:0x1;
+    bal_config.onTime = prx->data16[2];
+    bal_config.offTime = prx->data16[3];
+    nvm_set_bal_config(&bal_config);
+  }
+  return 0;
+}
+
+// set resistance beta and beta temp of NTC
+int8_t ntc_config_handler(CANRxFrame *prx,CANTxFrame *ptx)
+{
+  _nvm_ntc_cfg_s ntc;
+  nvm_get_block(PG_CMU_TC,(uint8_t*)&ntc);
+  if(prx->RTR == CAN_RTR_REMOTE){
+//    CANTxFrame txMsg;
+//    txMsg.EID = eidActive | (nvmBoard.id << 12);
+    ptx->RTR = CAN_RTR_DATA;
+    ptx->DLC = 8;
+    ptx->IDE = CAN_IDE_EXT;
+    
+    ptx->data16[0] = ntc.resistance[0];
+    ptx->data16[1] = ntc.beta[0];
+    ptx->data8[4] = ntc.betaTemp[0];
+    return 1;
+    //canTransmit(&CAND1,CAN_ANY_MAILBOX,&txMsg,TIME_MS2I(100));
+  }
+  else{
+//    if(palReadPad(GPIOA,12) == PAL_LOW){
+      for(uint8_t i=0;i<NOF_MAX_AUXIO;i++){
+        ntc.resistance[i] = prx->data16[0];
+      }
+      for(uint8_t i=0;i<NOF_MAX_AUXIO;i++){
+        ntc.beta[i] = prx->data16[1];
+      }
+      for(uint8_t i=0;i<NOF_MAX_AUXIO;i++){
+        ntc.betaTemp[i] = prx->data8[4];
+      }
+      nvm_set_block(PG_CMU_TC,(uint8_t*)&ntc);
+//    }
+  }
+  return 0;
+}
+
+// set/get cell queue
+int8_t cell_queue_config_handler(CANRxFrame *prx,CANTxFrame *ptx)
+{
+  if(prx->RTR == CAN_RTR_REMOTE){
+    //ptx->EID = eidActive | (nvmBoard.id << 12);
+    ptx->RTR = CAN_RTR_DATA;
+    ptx->DLC = 8;
+    ptx->IDE = CAN_IDE_EXT;
+    
+    nvm_get_cellQueueEx(&ptx->data16[0]);
+    return 1;
+    //canTransmit(&CAND1,CAN_ANY_MAILBOX,&txMsg,TIME_MS2I(100));
+  }
+  else{
+    //if(palReadPad(GPIOA,12) == PAL_LOW){
+      nvm_set_cellQueueEx(prx->data8);
+    //}
+  }
+  return 0;
+}
+

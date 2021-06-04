@@ -90,15 +90,21 @@ static TLE9012_ERR tle9012_readRegister(TLE9012Driver *dev, uint8_t reg, uint16_
 TLE9012_ERR tle9012_setID(TLE9012Driver *dev, uint8_t id)
 {
   TLE9012_ERR err = TLE9012_NOERR;
-  uint8_t txBuf[6]={0x1E,0x80,0x36,0x00,0x01,0x78};
+  uint8_t txBuf[6]={0x1E,0x80,0x36,0x00,0x00,0x78};
   txBuf[3] = 0x08; // final node
   txBuf[4] = id;
   txBuf[5] = crc8_msb(CRC_POLY,txBuf,5);
   
-  dev->registerWrite(dev,txBuf,6,10);
+  dev->registerWrite(dev,txBuf,6,100);
   chThdSleepMilliseconds(100);
-  //uint8_t rxBuf[12];
-  //dev->registerRead(dev,rxBuf,6,10);
+  uint8_t rxBuf[12];
+  
+  txBuf[1] = 0x01;
+  txBuf[2] = 0x36;
+  txBuf[3] = 0x62;
+  dev->registerWrite(dev,txBuf,4,100);
+  
+  dev->registerRead(dev,rxBuf,6,10);
   
   return err;
 }
@@ -226,7 +232,7 @@ void tle9012_wakeup(TLE9012Driver *dev)
   //chThdSleepMilliseconds(1);
   
   for(uint8_t i=0;i<16;i++){
-    uint8_t n=80;
+    uint8_t n=90;
     while(--n)
       __NOP();
     palTogglePad(GPIOA,9);
@@ -251,12 +257,23 @@ TLE9012_ERR tle9012_init(TLE9012Driver *dev)
   }
   
   
-  tle9012_wakeup(dev);
+  uint8_t loop = 5;
+  for(uint8_t i=0;i<loop;i++){
+    tle9012_wakeup(dev);
+    chThdSleepMilliseconds(2);
+  }
+ // tle9012_wakeup(dev);
   
   
   sdStart(dev->config->devp,dev->config->config);
-
+  
+//  uint8_t tx[16];
+//  for(uint8_t i=0;i<16;i++){
+//    tx[i] = 0x55;
+//  }
+  //sdWriteTimeout(dev->config->devp,tx,16,TIME_MS2I(100));
   tle9012_setID(dev,dev->id);
+  //tle9012_setID(dev,dev->id+1);
 
   uint16_t tmp16;
   tle9012_writeRegister(dev,REG_PART_CONFIG,0xfff);
