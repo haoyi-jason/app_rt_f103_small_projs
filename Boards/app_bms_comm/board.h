@@ -124,12 +124,12 @@
 #define VAL_GPIOACRH    (PIN_OUTPUT_PP_2(8) | /* I2C2.SCL              */  \
                          PIN_OUTPUT_PP_2(9) | /* USART1_TX.         */  \
                          PIN_UNDEFINED(10)          | /* USART1_RX.         */  \
-                         PIN_INPUT_PUD(11)      | /* USART1_CTS            */  \
-                         PIN_INPUT_PUD(12)      | /* USART1_RTS            */  \
+                         PIN_OUTPUT_PP_2(11)      | /* USART1_CTS            */  \
+                         PIN_OUTPUT_PP_2(12)      | /* USART1_RTS            */  \
                          PIN_UNDEFINED(13)          | /* Not use              */  \
                          PIN_UNDEFINED(14)          | /* not use            */  \
                          PIN_OUTPUT_PP_2(15))     /* SMU_STB               */
-#define VAL_GPIOAODR    0xFFFF8EF7
+#define VAL_GPIOAODR    0xFFFFFEF7
 
 /*
  * Port B setup.

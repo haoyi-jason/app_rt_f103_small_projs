@@ -6,6 +6,7 @@
 #include "at32_flash.h"
 #include "can_frame_handler.h"
 
+#define NVM_FLAG        0x16    // 2021/06
 
 
 int8_t config_handler(CANRxFrame *prx,CANTxFrame *ptx);
@@ -110,7 +111,7 @@ void nvmWrite()
 
 void nvmLoadDefault()
 {
-  nvmParam.flag = 0x55;
+  nvmParam.flag = NVM_FLAG;
   nvmParam.boardId = BOARD_ID;
   nvmParam.id = 0x3F;  // for HVB, ID always = 0x1f (31d) for group 1 to 6 (3-bit MSB)
   for(uint8_t i=0;i<8;i++){
@@ -120,13 +121,23 @@ void nvmLoadDefault()
     nvmParam.adc_transfer[i].eng_high = 100.0;
     nvmParam.adc_transfer[i].factor = 100;
   }
-  
+  // ch.2 for current
+    nvmParam.adc_transfer[2].raw_low = -20000;
+    nvmParam.adc_transfer[2].raw_high = 20000;
+    nvmParam.adc_transfer[2].eng_low = -4000.0;
+    nvmParam.adc_transfer[2].eng_high = 4000.0;
+
+    //ch.3 for voltage
+    nvmParam.adc_transfer[3].raw_low = 0;
+    nvmParam.adc_transfer[3].raw_high = 32767;
+    nvmParam.adc_transfer[3].eng_low = 0.0;
+    nvmParam.adc_transfer[3].eng_high = 10300.0;
 }
 
 void nvmFlashInit()
 {
   nvmRead(); // load nvm
-  if(nvmParam.flag != 0x55){
+  if(nvmParam.flag != NVM_FLAG){
     // load default
     nvmLoadDefault();
     nvmWrite();
@@ -208,7 +219,7 @@ float engTransfer(int id)
 {
   float ret = 0.;
   struct analog_transfer *t = &nvmParam.adc_transfer[id];
-  uint16_t raw = runTime.analogIn[id];
+  int16_t raw = runTime.analogIn[id];
   if(raw < t->raw_low){
     ret = t->eng_low;
   }
@@ -226,53 +237,59 @@ static THD_FUNCTION(procADS1115,p){
   (void)p;
   uint16_t volts[8];
   uint16_t amps[8];
-  ads1015_set_pga(&ads1115,PGA_6_144);
   ads1015_set_mode(&ads1115,MODE_SINGLE);
 //  ads1015_set_thresLow(&ads1115);
 //  ads1015_set_thresHigh(&ads1115);
+  //PGA_1_024
   uint8_t voltIndex = 0, ampIndex = 0;
   bool bRun = true;
   uint8_t state = 0;
   int32_t voltSum,ampSum;
+  ads1015_set_pga(&ads1115,PGA_1_024);
+  int32_t sum = 0;
   while(bRun){
     switch(state){
     case 0:
-      ads1015_set_mux(&ads1115,MUX_AIN0_GND);
+    case 2:
+    case 4:
+    case 6:
+//      ads1015_set_mux(&ads1115,MUX_AIN0_AIN1);
       ads1015_start_conversion(&ads1115);
       state++;
       break;
     case 1:
-      runTime.analogIn[0] = ads1015_read_data(&ads1115);
-      state++;
-      break;
-    case 2:
-      ads1015_set_mux(&ads1115,MUX_AIN1_GND);
-      ads1015_start_conversion(&ads1115);
-      state++;
-      break;
     case 3:
-      runTime.analogIn[1] = ads1015_read_data(&ads1115);
-      state++;
-      break;
-    case 4:
-      ads1015_set_mux(&ads1115,MUX_AIN2_GND);
-      ads1015_start_conversion(&ads1115);
-      state++;
-      break;
     case 5:
-      runTime.analogIn[2] = ads1015_read_data(&ads1115);
-      state++;
-      break;
-    case 6:
-      ads1015_set_mux(&ads1115,MUX_AIN3_GND);
-      ads1015_start_conversion(&ads1115);
-      state++;
-      break;
     case 7:
-      runTime.analogIn[3] = ads1015_read_data(&ads1115);
+      sum += ads1015_read_data(&ads1115);
       state++;
       break;
     case 8:
+      runTime.analogIn[2] = sum >> 2;
+      state = 10;
+      sum = 0;
+      ads1015_set_mux(&ads1115,MUX_AIN3_GND);
+      break;
+    case 10:
+    case 12:
+    case 14:
+    case 16:
+      ads1015_start_conversion(&ads1115);
+      state++;
+      break;
+    case 11:
+    case 13:
+    case 15:
+    case 17:
+      sum += ads1015_read_data(&ads1115);
+      state++;
+      break;
+    case 18:
+      runTime.analogIn[3] = sum >> 2;
+      sum = 0;
+      ads1015_set_mux(&ads1115,MUX_AIN0_AIN1);
+      state = 19;
+    case 19:
       for(uint8_t i=0;i< NOF_ADC_CH;i++){
 //        runTime.analogResult[i] = (int16_t)(nvmParam.adc_transfer[i].eng_high - nvmParam.adc_transfer[i].eng_low)*(runTime.analogIn[i] - nvmParam.adc_transfer[i].raw_low)/(nvmParam.adc_transfer[i].raw_high - nvmParam.adc_transfer[i].raw_low);
         runTime.analogResult[i] = (int16_t)engTransfer(i);
@@ -401,13 +418,16 @@ int8_t analog_input_handler(CANRxFrame *prx,CANTxFrame *ptx)
   else{ // adc channel config
     uint8_t ch = prx->data8[0];
     uint8_t opt = prx->data8[1];  
+    int16_t tmp;
     if(ch < 4){
       switch(opt){
       case 0: // raw low;
-        nvmParam.adc_transfer[ch].raw_low = prx->data16[1];
+        tmp = (int16_t)prx->data16[1];
+        nvmParam.adc_transfer[ch].raw_low = (int32_t)(tmp);
         break;
       case 1: // raw_high
-        nvmParam.adc_transfer[ch].raw_high = prx->data16[1];
+        tmp = (int16_t)prx->data16[1];
+        nvmParam.adc_transfer[ch].raw_high = (int32_t)(tmp);
         break;
       case 2: // eng_low, float
         memcpy(&nvmParam.adc_transfer[ch].eng_low,(void*)&prx->data8[2],4);

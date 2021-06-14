@@ -340,7 +340,6 @@ int8_t balancing_config_handler(CANRxFrame *prx,CANTxFrame *ptx)
     ptx->RTR = CAN_RTR_DATA;
     ptx->DLC = 8;
     ptx->IDE = CAN_IDE_EXT;
-    
     ptx->data16[0] = bal_config.balanceVoltMv;
     ptx->data8[2] = bal_config.balanceHystersisMv;
     ptx->data8[3] = bal_config.enableBalance;
@@ -350,12 +349,36 @@ int8_t balancing_config_handler(CANRxFrame *prx,CANTxFrame *ptx)
 //    canTransmit(&CAND1,CAN_ANY_MAILBOX,&txMsg,TIME_MS2I(100));
   }
   else{
-    bal_config.balanceVoltMv = prx->data16[0];
-    bal_config.balanceHystersisMv = (uint8_t)prx->data8[2];
-    bal_config.enableBalance = prx->data8[3] == 0x0?0x0:0x1;
-    bal_config.onTime = prx->data16[2];
-    bal_config.offTime = prx->data16[3];
-    nvm_set_bal_config(&bal_config);
+    bool valid = false;
+    if(prx->DLC == 2){
+      bal_config.balanceVoltMv = prx->data16[0];
+      valid = true;
+    }
+    else if(prx->DLC == 3){
+      bal_config.balanceVoltMv = prx->data16[0];
+      bal_config.balanceHystersisMv = (uint8_t)prx->data8[2];
+      valid = true;
+    }
+    else if(prx->DLC == 4){
+      bal_config.balanceVoltMv = prx->data16[0];
+      bal_config.balanceHystersisMv = (uint8_t)prx->data8[2];
+      bal_config.enableBalance = prx->data8[3] == 0x0?0x0:0x1;
+      valid = true;
+    }
+    else if(prx->DLC == 8){
+      bal_config.balanceVoltMv = prx->data16[0];
+      bal_config.balanceHystersisMv = (uint8_t)prx->data8[2];
+      bal_config.enableBalance = prx->data8[3] == 0x0?0x0:0x1;
+      bal_config.onTime = prx->data16[2];
+      bal_config.offTime = prx->data16[3];
+      if((bal_config.onTime < 40) && (bal_config.offTime >= bal_config.onTime)){
+        valid = true;
+      }
+    }
+    
+    if(valid){
+      nvm_set_bal_config(&bal_config);
+    }
   }
   return 0;
 }
