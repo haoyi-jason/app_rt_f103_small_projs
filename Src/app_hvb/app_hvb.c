@@ -5,6 +5,8 @@
 #include "ads1015.h"
 #include "at32_flash.h"
 #include "can_frame_handler.h"
+#include "iir.h"
+#include <math.h>
 
 #define NVM_FLAG        0x16    // 2021/06
 
@@ -24,6 +26,12 @@ struct can_frame_handler PacketHandler[] = {
 //  {0x150,analog_output_handler},
   {0x160,analog_input_handler},  
 //  {0x180,power_output_handler},  
+};
+
+
+_float_filter_t filters[2] = {
+  {16,1,0,0},
+  {16,1,0,0},
 };
 
 
@@ -64,7 +72,7 @@ static ads1x15_config_t ads1115_config = {
 
 ADS1x15Driver ads1115 = {
   &ads1115_config,
-  0x8583,
+  0x8583, // 128 sps
   0x0,
   0x1,
   ADS1015_ADDR_GND
@@ -215,11 +223,11 @@ static THD_FUNCTION(procCANBUS,p){
   
 };
 
-float engTransfer(int id)
+float engTransfer(int id, int16_t raw)
 {
   float ret = 0.;
   struct analog_transfer *t = &nvmParam.adc_transfer[id];
-  int16_t raw = runTime.analogIn[id];
+  //int16_t raw = runTime.analogIn[id];
   if(raw < t->raw_low){
     ret = t->eng_low;
   }
@@ -227,7 +235,7 @@ float engTransfer(int id)
     ret = t->eng_high;
   }
   else{
-    ret = t->eng_low + (runTime.analogIn[id] - t->raw_low)*(t->eng_high - t->eng_low)/(t->raw_high - t->raw_low);
+    ret = t->eng_low + (raw - t->raw_low)*(t->eng_high - t->eng_low)/(t->raw_high - t->raw_low);
   }
   return ret;
 }
@@ -245,62 +253,37 @@ static THD_FUNCTION(procADS1115,p){
   bool bRun = true;
   uint8_t state = 0;
   int32_t voltSum,ampSum;
+  ads1015_set_mux(&ads1115,MUX_AIN0_AIN1);
   ads1015_set_pga(&ads1115,PGA_1_024);
   int32_t sum = 0;
+  int16_t raw;
   while(bRun){
     switch(state){
     case 0:
-    case 2:
-    case 4:
-    case 6:
-//      ads1015_set_mux(&ads1115,MUX_AIN0_AIN1);
       ads1015_start_conversion(&ads1115);
       state++;
       break;
     case 1:
-    case 3:
-    case 5:
-    case 7:
-      sum += ads1015_read_data(&ads1115);
-      state++;
-      break;
-    case 8:
-      runTime.analogIn[2] = sum >> 2;
-      state = 10;
-      sum = 0;
+      raw = ads1015_read_data(&ads1115);
       ads1015_set_mux(&ads1115,MUX_AIN3_GND);
-      break;
-    case 10:
-    case 12:
-    case 14:
-    case 16:
+      iir_insert_f(&filters[0],engTransfer(2,raw));
+      state++;
+    case 2:
       ads1015_start_conversion(&ads1115);
       state++;
       break;
-    case 11:
-    case 13:
-    case 15:
-    case 17:
-      sum += ads1015_read_data(&ads1115);
-      state++;
-      break;
-    case 18:
-      runTime.analogIn[3] = sum >> 2;
-      sum = 0;
+    case 3:
+      raw = ads1015_read_data(&ads1115);
       ads1015_set_mux(&ads1115,MUX_AIN0_AIN1);
-      state = 19;
-    case 19:
-      for(uint8_t i=0;i< NOF_ADC_CH;i++){
-//        runTime.analogResult[i] = (int16_t)(nvmParam.adc_transfer[i].eng_high - nvmParam.adc_transfer[i].eng_low)*(runTime.analogIn[i] - nvmParam.adc_transfer[i].raw_low)/(nvmParam.adc_transfer[i].raw_high - nvmParam.adc_transfer[i].raw_low);
-        runTime.analogResult[i] = (int16_t)engTransfer(i);
-      }
-      runTime.voltage = runTime.analogResult[3];
-      runTime.current = runTime.analogResult[2];
+      iir_insert_f(&filters[1],engTransfer(3,raw));
+      runTime.analogResult[2] = (int16_t)lround(filters[0].last);
+      runTime.analogResult[3] = (int16_t)lround(filters[1].last);
       state = 0;
       break;
+    default:break;
     }
     
-    chThdSleepMilliseconds(10);
+    chThdSleepMilliseconds(50);
     if(chThdShouldTerminateX()){
       bRun = false;
     }
@@ -322,20 +305,8 @@ void main(void)
   //nvmInit(&I2CD2);
   nvmFlashInit();
   
-//  palClearPad(GPIOB,12);
-//  palSetPad(GPIOB,12);
-//  palClearPad(GPIOB,12);
-//  palSetPad(GPIOB,12);
-  //spiTest();
-//  serialTest();
-  //eep_test();
-//  canTest();
   runTime.canThread = chThdCreateStatic(waCANBUS, sizeof(waCANBUS), NORMALPRIO, procCANBUS, NULL);
   runTime.adsThread = chThdCreateStatic(waADS1115, sizeof(waADS1115), NORMALPRIO, procADS1115, NULL);
-  //cmuMgmtInit();
-  
-//  bmu_ltc_init();
-//  balInit();
 
   while(1){
     chThdSleepMilliseconds(500);

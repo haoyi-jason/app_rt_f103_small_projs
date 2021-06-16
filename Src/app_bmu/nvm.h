@@ -53,6 +53,12 @@ typedef struct{
   uint8_t betaTemp[NOF_MAX_AUXIO];
 }_nvm_ntc_cfg_s;
 
+typedef struct{
+  _nvm_board_s board;
+  _nvm_balance_cfg_s balance_config;
+  _nvm_ntc_cfg_s ntc_config;
+}_nvmParam;
+
 
 /** Runtime Datablock **/
 enum cell_state{

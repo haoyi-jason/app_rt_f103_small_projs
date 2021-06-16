@@ -4,6 +4,7 @@
 #include "nvm.h"
 #include "at24_eep.h"
 #include "ntc.h"
+#include "at32_flash.h"
 
 static I2CDriver *dev = &I2CD2;
 static thread_t *thisThd;
@@ -11,7 +12,7 @@ const _nvm_board_s nvmBoardDefault = {
   .id = 0x01,
   .boardId = BOARD_ID,
   .flag = FG_NORMAL,
-  .cellQueue = {1,1,1,1,1,1,1,1,1,1,1,1},     // 8-cell BMU
+  .cellQueue = {1,1,1,1,1,1,1,1,1,1,1,1},     // 12-cell BMU
   .cellVoltReportNormal = 1000,  
   .cellVoltReportFast = 100,
   .cellTempReportNormal = 5000,
@@ -41,6 +42,8 @@ static _nvm_board_s nvmBoard;
 static _nvm_balance_cfg_s nvmBalance;
 static _nvm_ntc_cfg_s nvmNtc;
 
+static _nvmParam nvmParam;
+
 _runtime_info_s runTime;
 
 /********** header **********/
@@ -55,6 +58,18 @@ static _block_header_s nvmHeader[] = {
   {(void*)&nvmBalance,sizeof(_nvm_balance_cfg_s)},
   {(void*)&nvmNtc,sizeof(_nvm_ntc_cfg_s)},
 };
+
+void nvmFlashReadPage(uint8_t page, uint8_t *d)
+{
+  flash_Read(page*NVM_PAGE_SIZe,(uint16_t*)d,NVM_PAGE_SIZE/2);
+}
+
+void nvmFlashWritePage(uint8_t page, uint8_t *d)
+{
+  chSysLock();
+  flash_Write(page * NVM_PAGE_SIZE,(uint16_t*)d,NVM_PAGE_SIZe/2);
+  chSysUnlock();
+}
 
 
 static msg_t nvmReadPage(uint8_t page, uint8_t *d)
@@ -80,6 +95,17 @@ static msg_t nvm_read_block(uint8_t id, uint8_t *dptr, uint16_t sz)
   return MSG_RESET;
 }
 
+static msg_t nvm_flash_read_block(uint8_t id, uint8_t *dptr, uint16_t sz)
+{
+  uint8_t pg[NVM_PAGE_SIZE];
+  if(id < PG_MAX){
+    nvmFlashReadPage(id,pg);
+    memcpy(dptr,pg,sz);
+    return MSG_OK;
+  }
+  return MSG_RESET;
+}
+
 static msg_t nvm_write_block(uint8_t id, uint8_t *dptr, uint16_t sz)
 {
   uint8_t pg[NVM_PAGE_SIZE];
@@ -87,6 +113,18 @@ static msg_t nvm_write_block(uint8_t id, uint8_t *dptr, uint16_t sz)
     memset(pg,0xff,NVM_PAGE_SIZE);
     memcpy(pg,dptr,sz);
     nvmWritePage(id,pg);
+    return MSG_OK;
+  }
+  return MSG_RESET;
+}
+
+static msg_t nvm_flash _write_block(uint8_t id, uint8_t *dptr, uint16_t sz)
+{
+  uint8_t pg[NVM_PAGE_SIZE];
+  if(id < PG_MAX){
+    memset(pg,0xff,NVM_PAGE_SIZE);
+    memcpy(pg,dptr,sz);
+    nvmFlashWritePage(id,pg);
     return MSG_OK;
   }
   return MSG_RESET;
@@ -114,9 +152,16 @@ msg_t nvm_runtime_get_cellVoltage(uint16_t *volts, uint8_t *n)
 
 msg_t nvm_runtime_get_cellVoltageQueued(uint16_t *volts, uint8_t *n)
 {
+//  uint8_t used = 0;
+//  for(uint8_t i=0;i<NOF_MAX_CELL_PER_MODULE;i++){
+//    if(nvmBoard.cellQueue[i] == 1){
+//      volts[used++]=runTime.cells.voltages[i];
+//    }
+//  }
+//  *n = used;
   uint8_t used = 0;
   for(uint8_t i=0;i<NOF_MAX_CELL_PER_MODULE;i++){
-    if(nvmBoard.cellQueue[i] == 1){
+    if(nvmParam.board.cellQueue[i] == 1){
       volts[used++]=runTime.cells.voltages[i];
     }
   }
@@ -154,7 +199,8 @@ msg_t nvm_runtime_get_temperature(int16_t *value, uint8_t *n)
 msg_t nvm_get_cellQueue(uint8_t *queue)
 {
   for(uint8_t i=0;i<NOF_MAX_CELL_PER_MODULE;i++){
-    queue[i] = nvmBoard.cellQueue[i];
+//    queue[i] = nvmBoard.cellQueue[i];
+    queue[i] = nvmParam.board.cellQueue[i];
   }
   return MSG_OK;
 }
@@ -163,7 +209,8 @@ msg_t nvm_get_cellQueueEx(uint16_t *queue)
 {
   uint16_t q = 0x0;
   for(uint8_t i=0;i<NOF_MAX_CELL_PER_MODULE;i++){
-    if(nvmBoard.cellQueue[i]==1){
+//    if(nvmBoard.cellQueue[i]==1){
+    if(nvmParam.board.cellQueue[i]==1){
       q |= (1 << i);
     }
   }
@@ -175,18 +222,18 @@ msg_t nvm_set_cellQueue(uint8_t *queue)
 {
   uint8_t active = 0;
   for(uint8_t i=0;i<NOF_MAX_CELL_PER_MODULE;i++){
-    nvmBoard.cellQueue[i] = queue[i];
-    if(nvmBoard.cellQueue[i] == 1){
+    nvmParam.board.cellQueue[i] = queue[i];
+    if(nvmParam.board.cellQueue[i] == 1){
       active++;
     }
   }
   runTime.activeCells = active;
-//  nvm_write_block(PG_BOARD,nvmHeader[PG_BOARD].block,nvmHeader[PG_BOARD].sz);
-  if(pendTask.State == 0){
-    pendTask.State = 2;
-    pendTask.id = PG_BOARD;
-    chEvtSignal(thisThd, EVENT_MASK(0));
-  }
+  nvm_flash_write_block(PG_BOARD,nvmHeader[PG_BOARD].block,nvmHeader[PG_BOARD].sz);
+//  if(pendTask.State == 0){
+//    pendTask.State = 2;
+//    pendTask.id = PG_BOARD;
+//    chEvtSignal(thisThd, EVENT_MASK(0));
+//  }
   return MSG_OK;
 }
 
@@ -204,20 +251,20 @@ msg_t nvm_set_cellQueueEx(uint8_t *queue)
   uint8_t active = 0;
   for(uint8_t i=0;i<8;i++){
     if((queue[0] & (1 << i)) == (1 << i)){
-      nvmBoard.cellQueue[i] = 1;
+      nvmParam.board.cellQueue[i] = 1;
       active++;
     }
     else{
-      nvmBoard.cellQueue[i] = 0;
+      nvmParam.board.cellQueue[i] = 0;
     }
   }
   for(uint8_t i=8;i<NOF_MAX_CELL_PER_MODULE;i++){
     if((queue[1] & (1 << (i-8))) == (1 << (i-8))){
-      nvmBoard.cellQueue[i] = 1;
+      nvmParam.board.cellQueue[i] = 1;
       active++;
     }
     else{
-      nvmBoard.cellQueue[i] = 0;
+      nvmParam.board.cellQueue[i] = 0;
     }
   }
 
@@ -317,7 +364,7 @@ msg_t nvm_runtime_get_balancingQueued(uint8_t *p)
   uint8_t i;
   uint8_t used = 0;
   for(i=0;i<NOF_MAX_CELL_PER_MODULE;i++){
-    if((nvmBoard.cellQueue[i] == 1)){
+    if((nvmParam.board.cellQueue[i] == 1)){
       if((runTime.cells.balancing[i] == 1)){
         if(used < 8)
           p[0] |= (1 << used);
@@ -360,6 +407,14 @@ void nvm_load_default()
   }
 }
 
+void nvm_flash_load_default()
+{
+  for(uint8_t i=0;i<PG_MAX;i++){
+    memcpy(nvmHeader[i].block,nvmHeaderDefault[i].block,nvmHeader[i].sz);
+    nvm_flash_write_block(i,nvmHeader[i].block,nvmHeader[i].sz);
+  }
+}
+
 static THD_WORKING_AREA(waNVM,512);
 static THD_FUNCTION(procNVM,p){
 
@@ -382,6 +437,7 @@ static THD_FUNCTION(procNVM,p){
   }
 }
 
+
 void nvmInit(I2CDriver *devp)
 {
   dev = devp;
@@ -403,4 +459,38 @@ void nvmInit(I2CDriver *devp)
   thisThd = chThdCreateStatic(waNVM, sizeof(waNVM), NORMALPRIO-1, procNVM, NULL);
 }
 
+
+void nvmFlashLoadDefault()
+{
+  nvmParam.flag = NVM_FLAG;
+  nvmParam.boardId = BOARD_ID;
+  nvmParam.id = 0x3F;  // for HVB, ID always = 0x1f (31d) for group 1 to 6 (3-bit MSB)
+  for(uint8_t i=0;i<8;i++){
+    nvmParam.adc_transfer[i].raw_low = 0;
+    nvmParam.adc_transfer[i].raw_high = 32767;
+    nvmParam.adc_transfer[i].eng_low = 0.0;
+    nvmParam.adc_transfer[i].eng_high = 100.0;
+    nvmParam.adc_transfer[i].factor = 100;
+  }
+  // ch.2 for current
+    nvmParam.adc_transfer[2].raw_low = -20000;
+    nvmParam.adc_transfer[2].raw_high = 20000;
+    nvmParam.adc_transfer[2].eng_low = -4000.0;
+    nvmParam.adc_transfer[2].eng_high = 4000.0;
+
+    //ch.3 for voltage
+    nvmParam.adc_transfer[3].raw_low = 0;
+    nvmParam.adc_transfer[3].raw_high = 32767;
+    nvmParam.adc_transfer[3].eng_low = 0.0;
+    nvmParam.adc_transfer[3].eng_high = 10300.0;
+}
+void nvmFlashInit()
+{
+  nvmFlashRead(); // load nvm
+  if(nvmParam.flag != NVM_FLAG){
+    // load default
+    nvmFlashLoadDefault();
+    nvmFlashWrite();
+  }
+}
 
