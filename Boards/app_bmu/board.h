@@ -26,11 +26,11 @@
 #define BOARD_AT32F4
 #define BOARD_NAME              "BMU-6811"
 #define BOARD_ID                0x06080002
-#define FW_VERSION              0x21042101
+#define FW_VERSION              0x21062101
 
 #define NOF_MAX_CELL_PER_MODULE         12
 #define NOF_MAX_AUXIO                   5
-#define NOF_CANFRAME_HANDLER             6
+#define NOF_CANFRAME_HANDLER             9
 
 /*
  * Board frequencies.

@@ -150,5 +150,7 @@ typedef struct{
   uint16_t OffTimeSecond;
 }bal_state_s;
 
+void balSetBalancingVoltage(uint16_t volt, uint8_t band);
+void balSetState(uint8_t enable);
 
 #endif

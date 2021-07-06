@@ -74,6 +74,7 @@ static msg_t bal_active_balancing_voltage2()
 }
 
 static _cell_bal_state_s balCells[BS_NR_OF_BAT_CELLS_PER_MODULE];
+static  _nvm_balance_cfg_s bal_config;
 
 static msg_t bal_active_balancing_voltage()
 {
@@ -83,7 +84,6 @@ static msg_t bal_active_balancing_voltage()
   minVolt = 5000;
   minId = 0;
   _nvm_board_s board;
-  _nvm_balance_cfg_s bal_config;
   uint16_t volts[BS_NR_OF_BAT_CELLS_PER_MODULE];
   uint16_t openWire;
   uint16_t cellMask;
@@ -91,17 +91,8 @@ static msg_t bal_active_balancing_voltage()
   
   //nvm_get_bal_config(&bal_config);
   nvm_get_block(PG_BOARD,(uint8_t*)&board);
-  nvm_get_block(PG_CMU_BC,(uint8_t*)&bal_config);
   
-//  nvm_get_bal_config(&bal_config);
-//  balState.enableBalancing = bal_config.enableBalance;
-//  balState.balancingVolt = bal_config.balanceVoltMv;
-//  balState.balancingHystersis = bal_config.balanceHystersisMv;
-//  balState.OnTimeSecond = bal_config.onTime;
-//  balState.OffTimeSecond = bal_config.offTime;
-    // read voltage from bmu
-//    bmu_lte_read_cellVolt(0,12,(uint8_t*)balState.volt);
-    nvm_runtime_get_cellVoltage(volts,&nofCells);
+  nvm_runtime_get_cellVoltage(volts,&nofCells);
   nvm_runtime_get_openWireQueued(&openWire);
   nvm_get_cellQueueEx(&cellMask);
   openWire &= cellMask;
@@ -160,6 +151,9 @@ static THD_WORKING_AREA(waBalance,512);
 static THD_FUNCTION(procBalance,p){
   (void)p;
   chThdResume(&thd_trp, MSG_OK);
+  nvm_get_block(PG_CMU_BC,(uint8_t*)&bal_config);
+  bal_config.enableBalance = false;
+  bal_config.balanceVoltMv = 5000;
   while(1){
     bal_active_balancing_voltage();
     // update balancing state
@@ -177,4 +171,15 @@ msg_t balInit(void)
   msg_t ret = chThdSuspendS(&thd_trp);
   chSysUnlock();
   return ret;  
+}
+
+void balSetBalancingVoltage(uint16_t volt, uint8_t band)
+{
+  bal_config.balanceVoltMv = volt;
+  bal_config.balanceHystersisMv = band;
+}
+
+void balSetState(uint8_t enable)
+{
+  bal_config.enableBalance = enable;
 }

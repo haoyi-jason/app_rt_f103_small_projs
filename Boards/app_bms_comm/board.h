@@ -26,8 +26,8 @@
 #define BOARD_AT32F4
 #define BOARD_NAME              "BMS_COMM"
 #define BOARD_ID                0x32f4001      // 0x06080002: BMU, 0x11150001: HV-ADS1015, 0x29490001: HV-2949, 0x32F40001: comm board
-#define FW_VERSION              0x21050301      // datecode for firmware version            
-#define NOF_CANFRAME_HANDLER             7
+#define FW_VERSION              0x21062101      // datecode for firmware version            
+#define NOF_CANFRAME_HANDLER             8
 /*
  * Board frequencies.
  */

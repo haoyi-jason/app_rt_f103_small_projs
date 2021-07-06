@@ -5,6 +5,7 @@
 
 #define NVM_PAGE_SIZE   64 // bytes
 #define SECTION_INITIALIZED     0xAB    // flag to indicate section initialized
+#define NVM_FLAG        0x16    // 2021/06
 
 
 enum flags{
@@ -54,9 +55,9 @@ typedef struct{
 }_nvm_ntc_cfg_s;
 
 typedef struct{
-  _nvm_board_s board;
-  _nvm_balance_cfg_s balance_config;
-  _nvm_ntc_cfg_s ntc_config;
+  _nvm_board_s *board;
+  _nvm_balance_cfg_s *balance_config;
+  _nvm_ntc_cfg_s *ntc_config;
 }_nvmParam;
 
 

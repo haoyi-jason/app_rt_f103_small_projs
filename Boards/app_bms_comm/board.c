@@ -112,3 +112,11 @@ int8_t board_output_state(uint8_t x)
   }
 }
 
+int8_t board_vout_state(uint8_t x)
+{
+  switch(x){
+  case 0:return palReadLine(LINE_VSOURCE_0)==PAL_HIGH?1:0;break;
+  case 1:return palReadLine(LINE_VSOURCE_1)==PAL_HIGH?1:0;break;
+  default: return 0;break;
+  }
+}

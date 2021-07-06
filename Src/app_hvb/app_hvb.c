@@ -18,8 +18,12 @@ int8_t digital_output_handler(CANRxFrame *prx,CANTxFrame *ptx);
 int8_t analog_input_handler(CANRxFrame *prx,CANTxFrame *ptx);
 int8_t analog_output_handler(CANRxFrame *prx,CANTxFrame *ptx);
 int8_t power_output_handler(CANRxFrame *prx,CANTxFrame *ptx);
+int8_t report_handler(CANRxFrame *prx,CANTxFrame *ptx);
+int8_t heartBeatHandler(CANRxFrame *prx,CANTxFrame *ptx);
 
 struct can_frame_handler PacketHandler[] = {
+  {0x20,heartBeatHandler},
+  {0x81,report_handler},
   {0x99,id_handler},
 //  {0x140,digital_output_handler},
 //  {0x141,digital_input_handler},
@@ -27,6 +31,19 @@ struct can_frame_handler PacketHandler[] = {
   {0x160,analog_input_handler},  
 //  {0x180,power_output_handler},  
 };
+
+static struct{
+  uint8_t active;
+  uint8_t emgReport;
+  uint16_t report_interval_ms;
+  uint8_t heartBeatLost;
+  uint8_t zero_calib;
+  int32_t raw_calib;
+  uint8_t band_calib;
+  uint8_t calib_cntr;
+  uint8_t calib_ch;
+  float calib_eng_pt;
+}commState;
 
 
 _float_filter_t filters[2] = {
@@ -160,8 +177,10 @@ static uint16_t reportMS=1000;
 static void report_cb(void *arg)
 {
   chSysLockFromISR();
-  chEvtSignalI(runTime.canThread, EVENT_MASK(1));
-  chVTSetI(&vtReport,TIME_MS2I(reportMS),report_cb,NULL);
+  if(commState.active == 1){
+    chEvtSignalI(runTime.canThread, EVENT_MASK(1));
+  }
+  chVTSetI(&vtReport,TIME_MS2I(commState.report_interval_ms),report_cb,NULL);
   chSysUnlockFromISR();
 }
 
@@ -184,6 +203,12 @@ static THD_FUNCTION(procCANBUS,p){
     eventmask_t evt = chEvtWaitAnyTimeout(ALL_EVENTS, TIME_MS2I(10));
     if(evt & 0x01){
       while(canReceive(ip,CAN_ANY_MAILBOX,&rxMsg,TIME_IMMEDIATE) == MSG_OK){
+        if(rxMsg.EID == 0x0020){ // heartbeat
+          heartBeatHandler(NULL,NULL);
+          commState.active = 1;
+          continue;
+        }
+
         uint16_t eidActive = rxMsg.EID & 0xFFF;
         uint8_t dest = (rxMsg.EID >> 12) & 0xFF;
         if(dest != nvmParam.id) continue;
@@ -201,15 +226,21 @@ static THD_FUNCTION(procCANBUS,p){
       // voltage: 16-bit unsigned, in unit of 0.1 v
       // current: 16-bit unsigned, in unit of 0.1 A
       // other 2 16-bit data for temperature
-      ptx.EID = nvmParam.id << 12;
-      ptx.EID |= 0x120; // todo: define message id
-      ptx.IDE = CAN_IDE_EXT;
-      ptx.DLC = 8;
-      ptx.RTR = CAN_RTR_DATA;
-      for(uint8_t i=0;i<4;i++){
-        ptx.data16[i] = runTime.analogResult[i];
+      commState.heartBeatLost++;
+      if(commState.heartBeatLost < 10){
+        ptx.EID = nvmParam.id << 12;
+        ptx.EID |= 0x120; // todo: define message id
+        ptx.IDE = CAN_IDE_EXT;
+        ptx.DLC = 8;
+        ptx.RTR = CAN_RTR_DATA;
+        for(uint8_t i=0;i<4;i++){
+          ptx.data16[i] = runTime.analogResult[i];
+        }
+        canTransmit(ip, CAN_ANY_MAILBOX,&ptx,TIME_MS2I(100));
       }
-      canTransmit(ip, CAN_ANY_MAILBOX,&ptx,TIME_MS2I(100));
+      else{
+        commState.active = 0;
+      }
     }
     
     
@@ -257,6 +288,7 @@ static THD_FUNCTION(procADS1115,p){
   ads1015_set_pga(&ads1115,PGA_1_024);
   int32_t sum = 0;
   int16_t raw;
+  
   while(bRun){
     switch(state){
     case 0:
@@ -265,25 +297,83 @@ static THD_FUNCTION(procADS1115,p){
       break;
     case 1:
       raw = ads1015_read_data(&ads1115);
+      runTime.analogIn[2] = raw;
       ads1015_set_mux(&ads1115,MUX_AIN3_GND);
       iir_insert_f(&filters[0],engTransfer(2,raw));
+      if(commState.calib_ch == 2){
+        if(commState.zero_calib == 1){
+          commState.raw_calib += raw;
+        }
+        else if(commState.band_calib == 1){
+          commState.raw_calib += raw;
+        }
+        commState.calib_cntr++;
+        if(commState.calib_cntr == 16){
+          commState.raw_calib >>= 4;
+          if(commState.zero_calib == 1){
+            nvmParam.adc_transfer[2].raw_high = 20000 + commState.raw_calib;
+            nvmParam.adc_transfer[2].raw_low = -20000 + commState.raw_calib;
+            nvmWrite();
+            commState.calib_ch = 0xff;
+            commState.zero_calib = 0;
+          }
+          else if(commState.band_calib == 1){
+            float ratio = nvmParam.adc_transfer[2].eng_high - nvmParam.adc_transfer[2].eng_low;
+            ratio /=2;
+            ratio /= commState.calib_eng_pt;
+            //if(ratio < 0) ratio *= -1;
+            int16_t offset = nvmParam.adc_transfer[2].raw_high + nvmParam.adc_transfer[2].raw_low;
+            offset >>= 1;
+            commState.raw_calib -= offset;
+            nvmParam.adc_transfer[2].raw_high = commState.raw_calib*ratio +offset;
+            nvmParam.adc_transfer[2].raw_low  = -commState.raw_calib*ratio + offset;
+            nvmWrite();
+            commState.calib_ch = 0xff;
+            commState.band_calib = 0;
+          }
+        }
+      }
       state++;
+     // state = 0;
     case 2:
       ads1015_start_conversion(&ads1115);
       state++;
       break;
     case 3:
       raw = ads1015_read_data(&ads1115);
+      runTime.analogIn[3] = raw;
       ads1015_set_mux(&ads1115,MUX_AIN0_AIN1);
       iir_insert_f(&filters[1],engTransfer(3,raw));
       runTime.analogResult[2] = (int16_t)lround(filters[0].last);
       runTime.analogResult[3] = (int16_t)lround(filters[1].last);
+      if(commState.calib_ch == 3){
+        commState.raw_calib += raw;
+        commState.calib_cntr++;
+        if(commState.calib_cntr == 16){
+          commState.raw_calib >>= 4;
+          if(commState.zero_calib == 1){
+            nvmParam.adc_transfer[3].raw_low += commState.raw_calib;
+            nvmWrite();
+            commState.calib_ch = 0xff;
+            commState.zero_calib = 0;
+          }
+          else if(commState.band_calib == 1){
+            float ratio = nvmParam.adc_transfer[2].eng_high - nvmParam.adc_transfer[2].eng_low;
+            ratio /= commState.calib_eng_pt;
+            nvmParam.adc_transfer[2].raw_high *= ratio;
+            nvmParam.adc_transfer[2].raw_low *= ratio;
+            nvmWrite();
+            commState.calib_ch = 0xff;
+            commState.band_calib = 0;
+          }
+        }
+      }
       state = 0;
       break;
     default:break;
     }
     
-    chThdSleepMilliseconds(50);
+    chThdSleepMilliseconds(100);
     if(chThdShouldTerminateX()){
       bRun = false;
     }
@@ -304,6 +394,13 @@ void main(void)
   
   //nvmInit(&I2CD2);
   nvmFlashInit();
+  
+  commState.active = 1;
+  commState.report_interval_ms = 1000;
+  commState.zero_calib = 0;
+  commState.band_calib = 0;
+  commState.raw_calib = 0;
+  commState.calib_ch = 0xff;
   
   runTime.canThread = chThdCreateStatic(waCANBUS, sizeof(waCANBUS), NORMALPRIO, procCANBUS, NULL);
   runTime.adsThread = chThdCreateStatic(waADS1115, sizeof(waADS1115), NORMALPRIO, procADS1115, NULL);
@@ -406,6 +503,22 @@ int8_t analog_input_handler(CANRxFrame *prx,CANTxFrame *ptx)
       case 3: // eng high, float
         memcpy(&nvmParam.adc_transfer[ch].eng_high,(void*)&prx->data8[2],4);
         break;
+      case 4: // offset calibration
+        if(commState.band_calib == 0){
+          commState.zero_calib = 1;
+          commState.raw_calib = 0;
+          commState.calib_cntr = 0;
+          commState.calib_ch = ch;
+        }
+        break;
+      case 5: // band calib
+        if(commState.zero_calib == 0){
+          commState.band_calib = 1;
+          commState.raw_calib = 0;
+          commState.calib_cntr = 0;
+          commState.calib_ch = ch;
+          memcpy(&commState.calib_eng_pt,(void*)&prx->data8[2],4);
+        }
       default:break;
       }
     }
@@ -421,5 +534,33 @@ int8_t analog_output_handler(CANRxFrame *prx,CANTxFrame *ptx)
 }
 int8_t power_output_handler(CANRxFrame *prx,CANTxFrame *ptx)
 {
+  return 0; 
+}
+
+// set/get report state
+int8_t report_handler(CANRxFrame *prx,CANTxFrame *ptx)
+{
+  if(prx->RTR == CAN_RTR_REMOTE){
+    //ptx->EID = eidActive | (nvmBoard.id << 12);
+    ptx->RTR = CAN_RTR_DATA;
+    ptx->DLC = 4;
+    ptx->IDE = CAN_IDE_EXT;
+    ptx->data8[0] = commState.active;
+    ptx->data8[1] = commState.emgReport;
+    ptx->data16[1] = commState.report_interval_ms;
+    return 1;
+  }
+  else{
+    if(prx->DLC >= 4){
+      commState.active = prx->data8[0];
+      commState.report_interval_ms = prx->data16[1];
+    }
+  }
+  return 0;
+}
+
+int8_t heartBeatHandler(CANRxFrame *prx,CANTxFrame *ptx)
+{
+  commState.heartBeatLost = 0;
   return 0; 
 }

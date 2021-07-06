@@ -26,9 +26,9 @@
 #define BOARD_AT32F4
 #define BOARD_NAME              "BMS_HVB"
 #define BOARD_ID                0x11150001
-#define FW_VERSION              0x21050701      // datecode for firmware version            
+#define FW_VERSION              0x21062101      // datecode for firmware version            
 
-#define NOF_CANFRAME_HANDLER             2
+#define NOF_CANFRAME_HANDLER             4
 
 
 /*

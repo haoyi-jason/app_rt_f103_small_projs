@@ -18,11 +18,16 @@ int8_t report_config_handler(CANRxFrame *prx,CANTxFrame *ptx);
 int8_t balancing_config_handler(CANRxFrame *prx,CANTxFrame *ptx);
 int8_t ntc_config_handler(CANRxFrame *prx,CANTxFrame *ptx);
 int8_t cell_queue_config_handler(CANRxFrame *prx,CANTxFrame *ptx);
-//int8_t power_output_handler(CANRxFrame *prx,CANTxFrame *ptx);
+int8_t cell_balance_handler(CANRxFrame *prx,CANTxFrame *ptx);
+int8_t report_handler(CANRxFrame *prx,CANTxFrame *ptx);
+int8_t heartBeatHandler(CANRxFrame *prx,CANTxFrame *ptx);
 
 
 struct can_frame_handler PacketHandler[] = {
   {0x01,config_handler},
+  {0x20,heartBeatHandler},
+  {0x80,cell_balance_handler},
+  {0x81,report_handler},
   {0x99,id_handler},
   {0x131,report_config_handler},
   {0x132,balancing_config_handler},
@@ -33,7 +38,17 @@ struct can_frame_handler PacketHandler[] = {
 
 
 static thread_t *thisThd;
-static _nvm_board_s nvmBoard;
+static _nvm_board_s nvmBoardc;
+
+static struct{
+  uint8_t active;
+  uint8_t emgReport;
+  uint16_t report_interval_ms;
+  uint16_t balancing_voltage;
+  uint8_t enableBalancing;
+  uint8_t balancing_band;
+  uint8_t heartBeatLost;
+}commState;
 
 static CANConfig canCfg500K = {
   CAN_MCR_ABOM | CAN_MCR_AWUM | CAN_MCR_TXFP,
@@ -119,8 +134,10 @@ static uint16_t reportMS;
 static void report_cb(void *arg)
 {
   chSysLockFromISR();
-  chEvtSignalI(thisThd, EVENT_MASK(1));
-  chVTSetI(&vtReport,TIME_MS2I(reportMS),report_cb,NULL);
+  if(commState.active){
+    chEvtSignalI(thisThd, EVENT_MASK(1));
+  }
+  chVTSetI(&vtReport,TIME_MS2I(commState.report_interval_ms),report_cb,NULL);
   chSysUnlockFromISR();
 }
 
@@ -131,7 +148,7 @@ static THD_FUNCTION(procCANRx,p){
   CANRxFrame rxMsg;
   event_listener_t el;
   CANTxFrame ptx;
-  nvm_get_block(PG_BOARD,(uint8_t*)&nvmBoard);
+  nvm_get_block(PG_BOARD,(uint8_t*)&nvmBoardc);
   
   ptx.data64[0] = 0x1;
   ptx.IDE = CAN_IDE_EXT;
@@ -140,20 +157,25 @@ static THD_FUNCTION(procCANRx,p){
   reportMS = 1000;
   chEvtRegister(&ip->rxfull_event,&el,0);
   chVTObjectInit(&vtReport);
-  chVTSet(&vtReport,TIME_MS2I(reportMS),report_cb,NULL);
   uint8_t reportID = 0;
   uint16_t volt[12];
   bool bRun = true;
   _nvm_balance_cfg_s bal_config;
-  nvmBoard.autoStart = 1;
+  nvmBoardc.autoStart = 1;
   uint32_t eidActive;
   uint8_t dest;
-  if(nvmBoard.autoStart == 1){
+  if(nvmBoardc.autoStart == 1){
 //    bmu_tle_init();
     bmu_ltc_init();
     balInit();
   }
-          
+  
+  commState.active = 1;
+  commState.report_interval_ms = 1000;
+  commState.balancing_voltage = 5000;
+  commState.enableBalancing = 0;
+  chVTSet(&vtReport,TIME_MS2I(reportMS),report_cb,NULL);
+  
   while(bRun){
     if(chThdShouldTerminateX()){
       bRun = false;
@@ -161,82 +183,57 @@ static THD_FUNCTION(procCANRx,p){
     eventmask_t evt = chEvtWaitAnyTimeout(ALL_EVENTS,TIME_MS2I(10));
     if(evt & 0x01){
       while(canReceive(ip,CAN_ANY_MAILBOX,&rxMsg,TIME_IMMEDIATE) == MSG_OK){
+        if(rxMsg.EID == 0x0020){ // heartbeat
+          heartBeatHandler(NULL,NULL);
+          commState.active = 1;
+          continue;
+        }
         eidActive = rxMsg.EID & 0xFFF;
         dest = (rxMsg.EID>>12)&0xff;
-        if((dest == nvmBoard.id) || (dest == 0x00)){
+        uint8_t group = (dest >> 5);
+        //dest &= 0x1F; // mask ID only
+        if((dest == nvmBoardc.id) || (dest == 0x00)){
           if(findHandlerByID(eidActive, &rxMsg,&ptx)>0){
-            ptx.EID = (nvmBoard.id << 12) | eidActive;
+            ptx.EID = (nvmBoardc.id << 12) | eidActive;
             canTransmit(ip,CAN_ANY_MAILBOX,&ptx,TIME_MS2I(100));
           }
         }
         
-//        if(eidActive == 0x131){ // set report speed
-//        }
-//        else if(eidActive == 0x132){ // set balancing volt, hystersis time and difference 
-//        }
-//        else if(eidActive == 0x133){ // set resistance beta and beta temp of NTC
-//        }
-//        else if(eidActive == 0x134){ 
-//        }
-//        else if(eidActive == 0x99){
-//          if(rxMsg.RTR == CAN_RTR_REMOTE){
-//            CANTxFrame txMsg;
-//            txMsg.EID = eidActive | (nvmBoard.id << 12);
-//            txMsg.RTR = CAN_RTR_DATA;
-//            txMsg.DLC = 8;
-//            txMsg.IDE = CAN_IDE_EXT;
-//            txMsg.data32[0] = BOARD_ID;
-//            txMsg.data32[1] = FW_VERSION;
-//            canTransmit(&CAND1,CAN_ANY_MAILBOX,&txMsg,TIME_MS2I(100));
-//          }
-//          else{
-//            if(palReadPad(GPIOA,12) == PAL_LOW){
-//              nvmBoard.id = rxMsg.data8[0];
-//              nvm_set_block(PG_BOARD,(uint8_t*)&nvmBoard);
-//            }
-//            else{
-//              bool valid = true;
-//              for(uint8_t i=0;i<4;i++){
-//                if(rxMsg.data8[i*2] != 0x55)
-//                  valid = false;
-//                if(rxMsg.data8[i*2+1] != 0xAA)
-//                  valid = false;
-//              }
-//              if(valid){
-//                nvm_set_default(0);
-//              }
-//            }
-//          }
-//        }
       }
     }
     if(evt & 0x02){
-      uint8_t sz;
-      nvm_runtime_get_cellVoltageQueued(volt,&sz);
-      for(uint8_t i=0;i<3;i++){
-        ptx.EID = CAN_TX_SYS_STATE_0+i;
-        ptx.EID |= (nvmBoard.id << 12);
-        memcpy(&ptx.data8[0],(uint8_t*)&volt[4*i],8);
+      commState.heartBeatLost++;
+      if(commState.heartBeatLost < 10){
+        uint8_t sz;
+        nvm_runtime_get_cellVoltageQueued(volt,&sz);
+        for(uint8_t i=0;i<3;i++){
+          ptx.EID = CAN_TX_SYS_STATE_0+i;
+          ptx.EID |= (nvmBoardc.id << 12);
+          memcpy(&ptx.data8[0],(uint8_t*)&volt[4*i],8);
+          canTransmit(&CAND1,CAN_ANY_MAILBOX,&ptx,TIME_MS2I(100));
+        }
+        nvm_runtime_get_temperature((int16_t*)volt,&sz);
+        ptx.EID = CAN_TX_SYS_STATE_0+3;
+        ptx.EID |= (nvmBoardc.id << 12);
+        memcpy(&ptx.data8[0],(uint8_t*)&volt[0],8);
+        canTransmit(&CAND1,CAN_ANY_MAILBOX,&ptx,TIME_MS2I(100));
+        memset(ptx.data8,0xFF,8);
+        ptx.EID = CAN_TX_SYS_STATE_0+4;
+        ptx.EID |= (nvmBoardc.id << 12);
+        memcpy(&ptx.data8[0],(uint8_t*)&volt[4],2);
+        canTransmit(&CAND1,CAN_ANY_MAILBOX,&ptx,TIME_MS2I(100));
+
+        memset(ptx.data8,0xFF,8);
+        ptx.EID = CAN_TX_SYS_STATE_0+5;
+        ptx.EID |= (nvmBoardc.id << 12);
+        nvm_runtime_get_balancingQueued(&ptx.data8[0]);
+        nvm_runtime_get_openWireQueued(&ptx.data16[1]);
+        ptx.data16[1] >>= 1;
         canTransmit(&CAND1,CAN_ANY_MAILBOX,&ptx,TIME_MS2I(100));
       }
-      nvm_runtime_get_temperature((int16_t*)volt,&sz);
-      ptx.EID = CAN_TX_SYS_STATE_0+3;
-      ptx.EID |= (nvmBoard.id << 12);
-      memcpy(&ptx.data8[0],(uint8_t*)&volt[0],8);
-      canTransmit(&CAND1,CAN_ANY_MAILBOX,&ptx,TIME_MS2I(100));
-      memset(ptx.data8,0xFF,8);
-      ptx.EID = CAN_TX_SYS_STATE_0+4;
-      ptx.EID |= (nvmBoard.id << 12);
-      memcpy(&ptx.data8[0],(uint8_t*)&volt[4],2);
-      canTransmit(&CAND1,CAN_ANY_MAILBOX,&ptx,TIME_MS2I(100));
-
-      memset(ptx.data8,0xFF,8);
-      ptx.EID = CAN_TX_SYS_STATE_0+5;
-      ptx.EID |= (nvmBoard.id << 12);
-      nvm_runtime_get_balancingQueued(&ptx.data8[0]);
-      nvm_runtime_get_openWireQueued(&ptx.data16[1]);
-      ptx.data16[1] >>= 1;
-      canTransmit(&CAND1,CAN_ANY_MAILBOX,&ptx,TIME_MS2I(100));
+      else{
+        commState.active = 0;
+      }
     }
     
 //    if(chEvtWaitAnyTimeout(ALL_EVENTS, TIME_MS2I(10))){
@@ -291,8 +288,8 @@ int8_t id_handler(CANRxFrame *prx,CANTxFrame *ptx)
       uint8_t gid = prx->data8[2] >> 5;
       uint8_t id = prx->data8[2] & 0x1f;
       if((id >0) && (gid > 0)){
-        nvmBoard.id = prx->data8[2];
-        nvm_set_block(PG_BOARD,(uint8_t*)&nvmBoard);
+        nvmBoardc.id = prx->data8[2];
+        nvm_set_block(PG_BOARD,(uint8_t*)&nvmBoardc);
       }
     }
     else{
@@ -336,7 +333,7 @@ int8_t balancing_config_handler(CANRxFrame *prx,CANTxFrame *ptx)
   uint16_t v;
   if(prx->RTR == CAN_RTR_REMOTE){
 //    CANTxFrame txMsg;
-//    txMsg.EID = eidActive | (nvmBoard.id << 12);
+//    txMsg.EID = eidActive | (nvmBoardc.id << 12);
     ptx->RTR = CAN_RTR_DATA;
     ptx->DLC = 8;
     ptx->IDE = CAN_IDE_EXT;
@@ -390,7 +387,7 @@ int8_t ntc_config_handler(CANRxFrame *prx,CANTxFrame *ptx)
   nvm_get_block(PG_CMU_TC,(uint8_t*)&ntc);
   if(prx->RTR == CAN_RTR_REMOTE){
 //    CANTxFrame txMsg;
-//    txMsg.EID = eidActive | (nvmBoard.id << 12);
+//    txMsg.EID = eidActive | (nvmBoardc.id << 12);
     ptx->RTR = CAN_RTR_DATA;
     ptx->DLC = 8;
     ptx->IDE = CAN_IDE_EXT;
@@ -422,7 +419,7 @@ int8_t ntc_config_handler(CANRxFrame *prx,CANTxFrame *ptx)
 int8_t cell_queue_config_handler(CANRxFrame *prx,CANTxFrame *ptx)
 {
   if(prx->RTR == CAN_RTR_REMOTE){
-    //ptx->EID = eidActive | (nvmBoard.id << 12);
+    //ptx->EID = eidActive | (nvmBoardc.id << 12);
     ptx->RTR = CAN_RTR_DATA;
     ptx->DLC = 8;
     ptx->IDE = CAN_IDE_EXT;
@@ -437,5 +434,58 @@ int8_t cell_queue_config_handler(CANRxFrame *prx,CANTxFrame *ptx)
     //}
   }
   return 0;
+}
+
+// set/get balancing voltage
+int8_t cell_balance_handler(CANRxFrame *prx,CANTxFrame *ptx)
+{
+  if(prx->RTR == CAN_RTR_REMOTE){
+    ptx->RTR = CAN_RTR_DATA;
+    ptx->DLC = 4;
+    ptx->IDE = CAN_IDE_EXT;
+    ptx->data8[0] = commState.enableBalancing;
+    ptx->data8[1] = commState.balancing_band;
+    ptx->data16[1] = commState.balancing_voltage;
+    return 1;
+  }
+  else{
+    if(prx->DLC >=4){
+      commState.enableBalancing = prx->data8[0];
+      commState.balancing_band = prx->data8[1];
+      commState.balancing_voltage = prx->data16[1];
+      
+      balSetState(commState.enableBalancing);
+      balSetBalancingVoltage(commState.balancing_voltage,commState.balancing_band);
+    }
+  }
+  return 0;
+}
+
+// set/get report state
+int8_t report_handler(CANRxFrame *prx,CANTxFrame *ptx)
+{
+  if(prx->RTR == CAN_RTR_REMOTE){
+    //ptx->EID = eidActive | (nvmBoardc.id << 12);
+    ptx->RTR = CAN_RTR_DATA;
+    ptx->DLC = 4;
+    ptx->IDE = CAN_IDE_EXT;
+    ptx->data8[0] = commState.active;
+    ptx->data8[1] = commState.emgReport;
+    ptx->data16[1] = commState.report_interval_ms;
+    return 1;
+  }
+  else{
+    if(prx->DLC >= 4){
+      commState.active = prx->data8[0];
+      commState.report_interval_ms = prx->data16[1];
+    }
+  }
+  return 0;
+}
+
+int8_t heartBeatHandler(CANRxFrame *prx,CANTxFrame *ptx)
+{
+  commState.heartBeatLost = 0;
+  return 0; 
 }
 

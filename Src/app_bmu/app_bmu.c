@@ -129,6 +129,7 @@ void main(void)
   AFIO->MAP6 |= AFIO_MAP6_CAN2_GRMP;
   
   nvmInit(&I2CD2);
+//  nvmFlashInit();
   
   cmuMgmtInit();
   
