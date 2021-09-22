@@ -27,6 +27,7 @@ typedef struct{
   uint16_t sz;
 }_block_header_s;
 
+
 typedef struct{
   uint8_t id;
   uint8_t flag;
@@ -116,5 +117,8 @@ msg_t nvm_runtime_get_balancingQueued(uint8_t *p);
 void nvmInit(I2CDriver *devp);
 
 msg_t nvm_set_default(uint8_t id);
+
+void nvmSetToBootMode(uint32_t option);
+
 
 #endif

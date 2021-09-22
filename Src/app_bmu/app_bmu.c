@@ -54,9 +54,9 @@ void spiTest()
 void serialTest()
 {
   
-  sdStart(&SD1,&serialcfg);
+  sdStart(&SD2,&serialcfg);
   for(uint8_t i=0;i<10;i++){
-    sdWrite(&SD1,"Hello\n",5);
+    sdWrite(&SD2,"Hello\n",5);
     chThdSleepMilliseconds(100);
   }
 

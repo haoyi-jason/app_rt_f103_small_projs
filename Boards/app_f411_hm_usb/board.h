@@ -143,8 +143,8 @@
                                      PIN_MODE_OUTPUT(GPIOA_LED_R )        |\
                                      PIN_MODE_ALTERNATE(GPIOA_UART1_TX )      |\
                                      PIN_MODE_ALTERNATE(GPIOA_UART1_RX )     |\
-                                     PIN_MODE_OUTPUT(GPIOA_UART1_CTS)     |\
-                                     PIN_MODE_OUTPUT(GPIOA_UART1_RTS)     |\
+                                     PIN_MODE_ALTERNATE(GPIOA_UART1_CTS)     |\
+                                     PIN_MODE_ALTERNATE(GPIOA_UART1_RTS)     |\
                                      PIN_MODE_ALTERNATE(GPIOA_P13)        |\
                                      PIN_MODE_ALTERNATE(GPIOA_P14)        |\
                                      PIN_MODE_OUTPUT(GPIOA_P15  ))
@@ -191,8 +191,8 @@
                                      PIN_PUPDR_PULLUP(GPIOA_LED_R         )         |\
                                      PIN_PUPDR_FLOATING(GPIOA_UART1_TX	  )         |\
                                      PIN_PUPDR_FLOATING(GPIOA_UART1_RX	  )         |\
-                                     PIN_PUPDR_FLOATING(GPIOA_UART1_CTS	    )             |\
-                                     PIN_PUPDR_FLOATING(GPIOA_UART1_RTS	    )         |\
+                                     PIN_PUPDR_PULLUP(GPIOA_UART1_CTS	    )             |\
+                                     PIN_PUPDR_PULLUP(GPIOA_UART1_RTS	    )         |\
                                      PIN_PUPDR_PULLUP(GPIOA_P13         )         |\
                                      PIN_PUPDR_PULLDOWN(GPIOA_P14         )         |\
                                      PIN_PUPDR_PULLUP(GPIOA_P15           ))
@@ -223,8 +223,8 @@
 #define VAL_GPIOA_AFRH              (PIN_AFIO_AF(GPIOA_LED_R       ,0)             |\
                                      PIN_AFIO_AF(GPIOA_UART1_TX	   ,7)             |\
                                      PIN_AFIO_AF(GPIOA_UART1_RX	   ,7)             |\
-                                     PIN_AFIO_AF(GPIOA_UART1_CTS   ,0)                 |\
-                                     PIN_AFIO_AF(GPIOA_UART1_RTS   ,0)             |\
+                                     PIN_AFIO_AF(GPIOA_UART1_CTS   ,10)                 |\
+                                     PIN_AFIO_AF(GPIOA_UART1_RTS   ,10)             |\
                                      PIN_AFIO_AF(GPIOA_P13         ,0)             |\
                                      PIN_AFIO_AF(GPIOA_P14         ,0)             |\
                                      PIN_AFIO_AF(GPIOA_P15         ,0))

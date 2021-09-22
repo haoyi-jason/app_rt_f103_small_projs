@@ -68,7 +68,7 @@
 typedef enum {
   MEAS_CTRL_BIT10,
   MWAS_CTRL_BIT11,
-  MWAS_BTRL_BIT16=6
+  MWAS_CTRL_BIT16=6
 }MEAS_CTRL_BIT_e;
 
 #define MEAS_CTRL_START_BVM     (1 << 11)
@@ -203,6 +203,7 @@ typedef struct{
   uint32_t commonTransferTime;
   uint8_t usedIndex;
   uint16_t measCtrl;
+  uint8_t errorCount;
 }TLE_STATE_s;
 
 

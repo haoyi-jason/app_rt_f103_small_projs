@@ -8,6 +8,8 @@
 #include "iir.h"
 #include <math.h>
 
+#include "bootConfig.h"
+
 #define NVM_FLAG        0x16    // 2021/06
 
 
@@ -21,7 +23,8 @@ int8_t power_output_handler(CANRxFrame *prx,CANTxFrame *ptx);
 int8_t report_handler(CANRxFrame *prx,CANTxFrame *ptx);
 int8_t heartBeatHandler(CANRxFrame *prx,CANTxFrame *ptx);
 
-struct can_frame_handler PacketHandler[] = {
+can_frame_handler PacketHandler[] = {
+  {0x01,config_handler},
   {0x20,heartBeatHandler},
   {0x81,report_handler},
   {0x99,id_handler},
@@ -30,6 +33,7 @@ struct can_frame_handler PacketHandler[] = {
 //  {0x150,analog_output_handler},
   {0x160,analog_input_handler},  
 //  {0x180,power_output_handler},  
+  {-1,NULL},
 };
 
 static struct{
@@ -51,6 +55,7 @@ _float_filter_t filters[2] = {
   {16,1,0,0},
 };
 
+static boot_info bootInfo;
 
 static SPIConfig spicfg = {
   false,
@@ -108,6 +113,8 @@ struct{
   int32_t analogAccum[8];       // accumulated raw data 
   int16_t analogIn[8]; //  ads1115 raw data
   int16_t analogResult[8]; // physical value, adc_value * analog_transfer
+  thread_reference_t canRef;
+  mutex_t mutex;
 }runTime;
 
 struct{
@@ -129,9 +136,11 @@ void nvmRead()
 
 void nvmWrite()
 {
+  //chMtxLock(&runTime.mutex);
   chSysLock();
   flash_Write(FLASH_START_ADDRESS,(uint16_t*)&nvmParam,sizeof(nvmParam)/2);
   chSysUnlock();
+  //chMtxUnlock(&runTime.mutex);
 }
 
 void nvmLoadDefault()
@@ -159,6 +168,23 @@ void nvmLoadDefault()
     nvmParam.adc_transfer[3].eng_high = 10300.0;
 }
 
+msg_t nvm_get_block(uint8_t id, uint8_t *dptr)
+{
+  if(id == 0x99){
+    flash_Read(BL_CONFIG_ADDRESS,(uint16_t*)dptr,sizeof(boot_info)/2);
+  }
+  return MSG_OK;
+}
+
+msg_t nvm_set_block(uint8_t id, uint8_t *dptr)
+{
+  if(id == 0x99){
+    flash_Write(BL_CONFIG_ADDRESS,(uint16_t*)dptr,sizeof(boot_info)/2);
+  }
+  return MSG_OK;
+}
+
+
 void nvmFlashInit()
 {
   nvmRead(); // load nvm
@@ -184,7 +210,7 @@ static void report_cb(void *arg)
   chSysUnlockFromISR();
 }
 
-static THD_WORKING_AREA(waCANBUS,1024);
+static THD_WORKING_AREA(waCANBUS,2048);
 static THD_FUNCTION(procCANBUS,p){
   CANDriver *ip = &CAND1;
   CANRxFrame rxMsg;
@@ -197,6 +223,16 @@ static THD_FUNCTION(procCANBUS,p){
   chVTSet(&vtReport,TIME_MS2I(1000),report_cb,NULL);
   
   canStart(ip,&canCfg250K);
+
+  boot_info bootInfo;
+  nvm_get_block(0x99,(uint8_t*)&bootInfo);
+  if(bootInfo.product_id != 0x20063000){
+    bootInfo.product_id = 0x20063000;
+    nvm_set_block(0x99,(uint8_t*)&bootInfo);
+  }
+  
+
+  chThdResume(&runTime.canRef,MSG_OK);
   bool bRun = true;
   while(bRun){
     
@@ -206,18 +242,20 @@ static THD_FUNCTION(procCANBUS,p){
         if(rxMsg.EID == 0x0020){ // heartbeat
           heartBeatHandler(NULL,NULL);
           commState.active = 1;
-          continue;
+//          continue;
         }
-
-        uint16_t eidActive = rxMsg.EID & 0xFFF;
-        uint8_t dest = (rxMsg.EID >> 12) & 0xFF;
-        if(dest != nvmParam.id) continue;
-        if(findHandlerByID(eidActive, &rxMsg,&ptx)>0){
-          ptx.EID = (nvmParam.id << 12) | eidActive;
-          canTransmit(ip,CAN_ANY_MAILBOX,&ptx,TIME_MS2I(100));
-        }
-        else{ // not suupported function
-          // do nothing
+        else{
+          uint16_t eidActive = rxMsg.EID & 0xFFF;
+          uint8_t dest = (rxMsg.EID >> 12) & 0xFF;
+          if(dest == nvmParam.id){
+            if(findHandlerByID(eidActive, &rxMsg,&ptx)>0){
+              ptx.EID = (nvmParam.id << 12) | eidActive;
+              canTransmit(ip,CAN_ANY_MAILBOX,&ptx,TIME_MS2I(100));
+            }
+            else{ // not suupported function
+              // do nothing
+            }
+          }
         }
       }
     }
@@ -395,6 +433,7 @@ void main(void)
   //nvmInit(&I2CD2);
   nvmFlashInit();
   
+  
   commState.active = 1;
   commState.report_interval_ms = 1000;
   commState.zero_calib = 0;
@@ -403,6 +442,7 @@ void main(void)
   commState.calib_ch = 0xff;
   
   runTime.canThread = chThdCreateStatic(waCANBUS, sizeof(waCANBUS), NORMALPRIO, procCANBUS, NULL);
+  chThdSuspendS(&runTime.canRef);
   runTime.adsThread = chThdCreateStatic(waADS1115, sizeof(waADS1115), NORMALPRIO, procADS1115, NULL);
 
   while(1){
@@ -451,6 +491,25 @@ int8_t id_handler(CANRxFrame *prx,CANTxFrame *ptx)
 
 int8_t config_handler(CANRxFrame *prx,CANTxFrame *ptx)
 {
+  boot_info bootInfo;
+  flash_Read(BL_CONFIG_ADDRESS,(uint16_t*)&bootInfo,sizeof(boot_info)/2);
+//  nvm_get_block(0x99,(uint8_t*)&bootInfo);
+  if(prx->RTR == CAN_RTR_REMOTE){
+    ptx->RTR = CAN_RTR_DATA;
+    ptx->DLC = 8;
+    ptx->IDE = CAN_IDE_EXT;
+    ptx->data32[0] = bootInfo.fw_version;
+    ptx->data32[1] = bootInfo.product_id;
+    return 1;
+  }
+  else if(prx->RTR == CAN_RTR_DATA){
+    if(prx->data32[0] == BOOT_KEY){
+        bootInfo.bootOption = BOOT_KEY;
+        flash_Write(BL_CONFIG_ADDRESS,(uint16_t*)&bootInfo,sizeof(boot_info)/2);
+        chSysDisable();
+        NVIC_SystemReset();
+    }
+  }
   return 0;
 }
 int8_t digital_input_handler(CANRxFrame *prx,CANTxFrame *ptx)
@@ -465,15 +524,27 @@ int8_t analog_input_handler(CANRxFrame *prx,CANTxFrame *ptx)
 {
   if(ptx->RTR == CAN_RTR_REMOTE){
     uint8_t idx = prx->EID & 0xFF;
-    switch(idx){
-    case 0:     // adc raw data, ch 0~3
+    uint8_t ch = prx->data8[0];
+    uint8_t opt = prx->data8[1];
+    switch(opt){
+    case 0: // raw low/high
+      ptx->data16[0] = nvmParam.adc_transfer[ch].raw_low;
+      ptx->data16[1] = nvmParam.adc_transfer[ch].raw_high;
+      ptx->DLC = 4;
+      break;
+    case 1: // eng low/high
+      memcpy(&ptx->data8[0],&nvmParam.adc_transfer[ch].eng_low,4);
+      memcpy(&ptx->data8[4],&nvmParam.adc_transfer[ch].eng_high,4);
+      ptx->DLC = 8;       
+      break;
+    case 0xE:     // adc raw data, ch 0~3
       ptx->data16[0] = runTime.analogIn[0];
       ptx->data16[1] = runTime.analogIn[1];
       ptx->data16[2] = runTime.analogIn[2];
       ptx->data16[3] = runTime.analogIn[3];
       ptx->DLC = 8;
       break;
-    case 1:     // adc raw data, ch 4~7
+    case 0xF:     // adc raw data, ch 4~7
       ptx->data16[0] = runTime.analogIn[4];
       ptx->data16[1] = runTime.analogIn[5];
       ptx->data16[2] = runTime.analogIn[6];

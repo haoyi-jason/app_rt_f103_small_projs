@@ -28,7 +28,7 @@
 #define BOARD_ID                0x11150001
 #define FW_VERSION              0x21062101      // datecode for firmware version            
 
-#define NOF_CANFRAME_HANDLER             4
+#define NOF_CANFRAME_HANDLER             5
 
 
 /*

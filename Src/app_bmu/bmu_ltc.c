@@ -207,9 +207,12 @@ static void LTC_SaveRXtoVoltagebuffer(uint8_t registerSet, uint8_t *rxBuffer) {
                 /* Check PEC for every LTC in the daisy-chain */
                 if (bmuState.errTable.PEC_valid == TRUE) {
                     //bmuState.cells.voltage[bmuState.usedIndex+i*(BS_NR_OF_BAT_CELLS_PER_MODULE)] = voltage;
-                  if(bmuState.reusageMeasurementMode == LTC_READ_VOLTAGES_PULLUP_OPENWIRE_CHECK){
+                  if(bmuState.reusageMeasurementMode == LTC_REUSE_READVOLT_FOR_ADOW_PUP){
                     bmuState.cells.pullupFeedback[voltage_index] = voltage;
                   }
+//                  else if(bmuState.reusageMeasurementMode == LTC_READ_VOLTAGES_PULLDOWN_OPENWIRE_CHECK){
+//                    bmuState.cells.pulldnFeedback[voltage_index] = voltage;
+//                  }
                   else if(bmuState.reusageMeasurementMode == LTC_REUSE_READVOLT_FOR_ADOW_PDOWN){
                     bmuState.cells.pulldnFeedback[voltage_index] = voltage;
                   }
@@ -1229,11 +1232,30 @@ static THD_FUNCTION(procBMU, arg)
               }
           }
           
-          for(uint8_t c=1;c < BS_NR_OF_BAT_CELLS_PER_MODULE-1 ; c++){
-            if(bmuState.cells.pullupFeedback[c] == 0){
-              bmuState.cells.openWire[c+1] = 1;
+          for(uint8_t c=0;c < BS_NR_OF_BAT_CELLS_PER_MODULE ; c++){
+            if((bmuState.cells.pullupFeedback[c] < 200) && (bmuState.cells.pulldnFeedback[c] < 200)){
+              bmuState.cells.openWire[c] = 1;
+            }
+            else{
+              bmuState.cells.openWire[c] = 0;
             }
           }
+
+          for(uint8_t c=0;c<BS_NR_OF_BAT_CELLS_PER_MODULE;c++){
+            if(bmuState.cells.activeCellQue[c] == 0){
+              bmuState.cells.openWire[c] = 0;
+            }
+          }
+          
+//          for(uint8_t c=1;c < BS_NR_OF_BAT_CELLS_PER_MODULE-1 ; c++){
+//            if(bmuState.cells.pullupFeedback[c] == 0){
+//              bmuState.cells.openWire[c+1] = 1;
+//            }
+//          }
+          
+          /* 2021/08/18 open wire check pup, pdown result in 0 mv reading
+              if battery is unplugged, temporary use this behavior to decide
+              whether open wire or not*/
 
           /* Write database entry */
 //          DB_WriteBlock(&ltc_openwire, DATA_BLOCK_ID_OPEN_WIRE);

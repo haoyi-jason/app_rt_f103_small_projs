@@ -125,8 +125,8 @@
                          PIN_ALTERNATE_PP_50(6)           | /* SPI1_MISO.         */  \
                          PIN_ALTERNATE_PP_50(7))  /* SPI1_MOSI.         */
 #define VAL_GPIOACRH    (PIN_ALTERNATE_OD_10(8) | /* I2C2.SCL              */  \
-                         PIN_OUTPUT_PP_50(9) | /* USART1_TX.         */  \
-                         PIN_UNDEFINED(10)          | /* USART1_RX.         */  \
+                         PIN_ALTERNATE_PP_50(9) | /* USART1_TX.         */  \
+                         PIN_INPUT_PUD(10)          | /* USART1_RX.         */  \
                          PIN_INPUT_PUD(11)      | /* USART1_CTS            */  \
                          PIN_INPUT_PUD(12)      | /* USART1_RTS            */  \
                          PIN_UNDEFINED(13)          | /* Not use              */  \

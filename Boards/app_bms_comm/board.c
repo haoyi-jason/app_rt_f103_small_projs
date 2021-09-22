@@ -87,6 +87,8 @@ void board_power_clr(uint8_t x)
   default:break;
   }
 }
+
+
 void baord_adc_reset()
 {
   palClearLine(LINE_AD5593_RST);

@@ -8,6 +8,7 @@
 #include "ntc.h"
 #include "bmu_tle.h"
 #include "can_frame_handler.h"
+#include "bootConfig.h"
 
 #define REPORT_INTERVAL_NORMAL  1000 // ms
 #define REPORT_INTERVAL_FAST    100 // ms
@@ -170,10 +171,17 @@ static THD_FUNCTION(procCANRx,p){
     balInit();
   }
   
+  boot_info bootInfo;
+  nvm_get_block(0x99,(uint8_t*)&bootInfo);
+//  bootInfo.product_id = 0x20061000;
+  bootInfo.product_id = 0x20060000;
+  nvm_set_block(0x99,(uint8_t*)&bootInfo);
+  
   commState.active = 1;
   commState.report_interval_ms = 1000;
   commState.balancing_voltage = 5000;
   commState.enableBalancing = 0;
+  commState.balancing_band = 8;
   chVTSet(&vtReport,TIME_MS2I(reportMS),report_cb,NULL);
   
   while(bRun){
@@ -191,8 +199,9 @@ static THD_FUNCTION(procCANRx,p){
         eidActive = rxMsg.EID & 0xFFF;
         dest = (rxMsg.EID>>12)&0xff;
         uint8_t group = (dest >> 5);
+        uint8_t my_grp = (nvmBoardc.id >> 5);
         //dest &= 0x1F; // mask ID only
-        if((dest == nvmBoardc.id) || (dest == 0x00)){
+        if((dest == nvmBoardc.id) || (dest == 0x00) || (group == my_grp)){
           if(findHandlerByID(eidActive, &rxMsg,&ptx)>0){
             ptx.EID = (nvmBoardc.id << 12) | eidActive;
             canTransmit(ip,CAN_ANY_MAILBOX,&ptx,TIME_MS2I(100));
@@ -228,7 +237,7 @@ static THD_FUNCTION(procCANRx,p){
         ptx.EID |= (nvmBoardc.id << 12);
         nvm_runtime_get_balancingQueued(&ptx.data8[0]);
         nvm_runtime_get_openWireQueued(&ptx.data16[1]);
-        ptx.data16[1] >>= 1;
+        //ptx.data16[1] >>= 1;
         canTransmit(&CAND1,CAN_ANY_MAILBOX,&ptx,TIME_MS2I(100));
       }
       else{
@@ -260,25 +269,37 @@ void cmuMgmtInit(void)
 
 int8_t config_handler(CANRxFrame *prx,CANTxFrame *ptx)
 {
-  if(prx->RTR == CAN_RTR_DATA){
-    switch(prx->data8[0]){
-    case 0x99: // save data
-      //nvmWrite();
-      //nvmParamPowerUp();
-      break;
-    default:break;
+  boot_info bootInfo;
+  nvm_get_block(0x99,(uint8_t*)&bootInfo);
+  if(prx->RTR == CAN_RTR_REMOTE){
+    ptx->RTR = CAN_RTR_DATA;
+    ptx->DLC = 8;
+    ptx->IDE = CAN_IDE_EXT;
+    ptx->data32[0] = bootInfo.fw_version;
+    ptx->data32[1] = bootInfo.product_id;
+    return 1;
+  }
+  else if(prx->RTR == CAN_RTR_DATA){
+    if(prx->data32[0] == BOOT_KEY){
+        bootInfo.bootOption = BOOT_KEY;
+        nvm_set_block(0x99,(uint8_t*)&bootInfo);
+        chSysDisable();
+        NVIC_SystemReset();
     }
   }
   return 0;
 }
 int8_t id_handler(CANRxFrame *prx,CANTxFrame *ptx)
 {
+  boot_info bootInfo;
+  nvm_get_block(0x99,(uint8_t*)&bootInfo);
+  
   if(prx->RTR == CAN_RTR_REMOTE){
     ptx->RTR = CAN_RTR_DATA;
     ptx->DLC = 8;
     ptx->IDE = CAN_IDE_EXT;
-    ptx->data32[0] = BOARD_ID;
-    ptx->data32[1] = FW_VERSION;
+    ptx->data32[0] = bootInfo.fw_version;
+    ptx->data32[1] = bootInfo.product_id;
     return 1;
   }
   else{
@@ -337,9 +358,9 @@ int8_t balancing_config_handler(CANRxFrame *prx,CANTxFrame *ptx)
     ptx->RTR = CAN_RTR_DATA;
     ptx->DLC = 8;
     ptx->IDE = CAN_IDE_EXT;
-    ptx->data16[0] = bal_config.balanceVoltMv;
-    ptx->data8[2] = bal_config.balanceHystersisMv;
-    ptx->data8[3] = bal_config.enableBalance;
+    ptx->data16[0] = commState.balancing_voltage;
+    ptx->data8[2] = commState.balancing_band;
+    ptx->data8[3] = commState.enableBalancing;
     ptx->data16[2] = bal_config.onTime;
     ptx->data16[3] = bal_config.offTime;
     return 1;
@@ -348,22 +369,22 @@ int8_t balancing_config_handler(CANRxFrame *prx,CANTxFrame *ptx)
   else{
     bool valid = false;
     if(prx->DLC == 2){
-      bal_config.balanceVoltMv = prx->data16[0];
+      //bal_config.balanceVoltMv = prx->data16[0];
       valid = true;
     }
     else if(prx->DLC == 3){
-      bal_config.balanceVoltMv = prx->data16[0];
+      //bal_config.balanceVoltMv = prx->data16[0];
       bal_config.balanceHystersisMv = (uint8_t)prx->data8[2];
       valid = true;
     }
     else if(prx->DLC == 4){
-      bal_config.balanceVoltMv = prx->data16[0];
+      //bal_config.balanceVoltMv = prx->data16[0];
       bal_config.balanceHystersisMv = (uint8_t)prx->data8[2];
       bal_config.enableBalance = prx->data8[3] == 0x0?0x0:0x1;
       valid = true;
     }
     else if(prx->DLC == 8){
-      bal_config.balanceVoltMv = prx->data16[0];
+      //bal_config.balanceVoltMv = prx->data16[0];
       bal_config.balanceHystersisMv = (uint8_t)prx->data8[2];
       bal_config.enableBalance = prx->data8[3] == 0x0?0x0:0x1;
       bal_config.onTime = prx->data16[2];

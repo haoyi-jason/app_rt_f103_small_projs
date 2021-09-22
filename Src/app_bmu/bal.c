@@ -103,6 +103,7 @@ static msg_t bal_active_balancing_voltage()
     }
   }
   uint8_t balEnable[BS_NR_OF_BAT_CELLS_PER_MODULE];
+  memset(balEnable,0x0,BS_NR_OF_BAT_CELLS_PER_MODULE);
   minVolt = bal_config.balanceVoltMv;
   minVolt += bal_config.balanceHystersisMv; // offset 8 mv
   if(bal_config.enableBalance){

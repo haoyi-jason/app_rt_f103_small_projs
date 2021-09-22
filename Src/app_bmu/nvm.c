@@ -5,6 +5,7 @@
 #include "at24_eep.h"
 #include "ntc.h"
 #include "at32_flash.h"
+#include "bootConfig.h"
 
 static I2CDriver *dev = &I2CD2;
 static thread_t *thisThd;
@@ -180,6 +181,17 @@ msg_t nvm_runtime_set_gpioVoltage(uint16_t *volts)
   return MSG_OK;
 }
     
+msg_t nvm_runtime_set_temperature(uint16_t *volts)
+{
+  uint8_t used = 0;
+  for(uint8_t i=0;i<NOF_MAX_AUXIO;i++){
+//    runTime.ntcTemp.gpioVolt[i] = volts[i];
+    // calculate temperature 
+    runTime.ntcTemp.temperature[i] = volts[i];
+  }
+  return MSG_OK;
+}
+
 msg_t nvm_runtime_get_gpioVoltage(uint16_t *volts, uint8_t *n)
 {
   for(uint8_t i=0;i<NOF_MAX_AUXIO;i++){
@@ -302,6 +314,9 @@ msg_t nvm_get_block(uint8_t id, uint8_t *dptr)
   if(id < PG_MAX){
     memcpy(dptr,nvmHeader[id].block, nvmHeader[id].sz);
   }
+  else if(id == 0x99){
+    flash_Read(BL_CONFIG_ADDRESS,(uint16_t*)dptr,sizeof(boot_info)/2);
+  }
   return MSG_OK;
 }
 
@@ -309,13 +324,10 @@ msg_t nvm_set_block(uint8_t id, uint8_t *dptr)
 {
   if(id < PG_MAX){
     memcpy(nvmHeader[id].block, dptr, nvmHeader[id].sz);
-    nvm_write_block(id,nvmHeader[id].block,nvmHeader[id].sz);
-//    if(pendTask.State == 0){
-//      pendTask.State = 2;
-//      pendTask.id = id;
-//      chEvtSignal(thisThd, EVENT_MASK(0));
-//    }
-    
+    nvm_write_block(id,nvmHeader[id].block,nvmHeader[id].sz);    
+  }
+  else if(id == 0x99){
+    flash_Write(BL_CONFIG_ADDRESS,(uint16_t*)dptr,sizeof(boot_info)/2);
   }
   return MSG_OK;
 }
@@ -382,10 +394,21 @@ msg_t nvm_runtime_set_openWire(uint8_t *p)
 {
   uint16_t tmp = 0x0;
   // set state to 1
-  for(uint8_t i=0;i<NOF_MAX_CELL_PER_MODULE+1;i++){
-    tmp |= (p[i]==1)?(1 << i):0;
+//  for(uint8_t i=0;i<NOF_MAX_CELL_PER_MODULE+1;i++){
+//    tmp |= (p[i]==1)?(1 << i):0;
+//  }
+  for(uint8_t i=0;i<NOF_MAX_CELL_PER_MODULE;i++){
+    if((nvmBoard.cellQueue[NOF_MAX_CELL_PER_MODULE-i-1] == 1)){
+      tmp <<= 1;
+      tmp |= (p[NOF_MAX_CELL_PER_MODULE-i-1]==1)?(1):0;
+    }
   }
   runTime.cells.openWire = tmp;
+}
+
+msg_t nvm_runtime_set_openWireQueued(uint16_t openWire)
+{
+  runTime.cells.openWire = openWire;
 }
 
 msg_t nvm_runtime_get_openWire(uint8_t *p)
@@ -458,6 +481,18 @@ void nvmInit(I2CDriver *devp)
   }
   runTime.id = nvmBoard.id;
   //thisThd = chThdCreateStatic(waNVM, sizeof(waNVM), NORMALPRIO-1, procNVM, NULL);
+  for(uint8_t i=0;i<NOF_MAX_CELL_PER_MODULE;i++){
+    runTime.cells.balancing[i] == 0;
+  }
+}
+
+void nvmSetToBootMode(uint32_t option)
+{
+  // load boot option
+  boot_info info;
+  nvmFlashReadPage(BL_CONFIG_PAGE,(uint8_t*)&info);
+  info.bootOption = option;
+  nvmFlashWritePage(BL_CONFIG_PAGE,(uint8_t*)&info);  
 }
 
 
@@ -468,6 +503,9 @@ void nvmFlashInit()
     // load default
     nvm_load_default();
     nvmFlashWrite();
+  }
+  for(uint8_t i=0;i<NOF_MAX_CELL_PER_MODULE;i++){
+    runTime.cells.balancing[i] == 0;
   }
   
   
